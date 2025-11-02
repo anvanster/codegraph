@@ -297,12 +297,24 @@ Before contributing, please:
 
 ## License
 
-Licensed under either of:
+codegraph is licensed under the **Apache License 2.0**, which means:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+✅ **You can:**
+- Use in commercial products
+- Modify and distribute
+- Use in proprietary software
 
-at your option.
+✅ **You must:**
+- Include a copy of the license
+- Disclose significant changes (in a CHANGES file)
+- Include the patent grant notice
+
+✅ **You can't:**
+- Hold us liable
+- Claim we endorse your product
+
+**This is a truly open license.** There's no "gotcha" later where we switch 
+to GPL or a commercial model. Apache-2.0 is forever.
 
 ## Code of Conduct
 
