@@ -1,0 +1,37 @@
+/.specify/
+/specs/
+# Common Rust ignores
+/target/
+/**/*.rs.bk
+# Rust build artifacts
+target/
+output/
+debug/
+release/
+*.rs.bk
+*.rlib
+*.prof*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs and environment
+*.log
+.env*
+
+# OS-specific
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Test artifacts
+*.test
+coverage/
+
+# RocksDB test databases
+*.graph
+test_db/

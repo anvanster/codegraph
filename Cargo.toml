@@ -1,0 +1,49 @@
+[package]
+name = "codegraph"
+version = "0.1.0"
+edition = "2021"
+authors = ["anvanster"]
+license = "MIT OR Apache-2.0"
+description = "A fast, reliable, and flexible graph database optimized for storing and querying code relationships"
+repository = "https://github.com/anvanster/codegraph"
+readme = "README.md"
+keywords = ["graph", "code-analysis", "database", "ast", "relationships"]
+categories = ["database-implementations", "data-structures", "development-tools"]
+
+[dependencies]
+# Storage backend
+rocksdb = "0.22"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Logging
+log = "0.4"
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+# Testing utilities
+criterion = "0.5"
+tempfile = "3.0"
+
+[lib]
+name = "codegraph"
+path = "src/lib.rs"
+
+[[bench]]
+name = "graph_operations"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
