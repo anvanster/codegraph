@@ -534,7 +534,7 @@ impl CodeGraph {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn query(&self) -> crate::query::QueryBuilder {
+    pub fn query<'a>(&'a self) -> crate::query::QueryBuilder<'a> {
         crate::query::QueryBuilder::new(self)
     }
 
