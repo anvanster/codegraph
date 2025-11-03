@@ -56,7 +56,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-codegraph = "0.1"
+codegraph = "0.1.1"
 ```
 
 ### Basic Usage
