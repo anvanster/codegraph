@@ -5,13 +5,11 @@
 //! - [`Edge`]: Directed relationships between nodes
 //! - [`CodeGraph`]: The main graph database interface
 
-mod types;
-mod property;
-mod codegraph;
 pub mod algorithms;
+mod codegraph;
+mod property;
+mod types;
 
-pub use types::{
-    Node, Edge, NodeId, EdgeId, NodeType, EdgeType, Direction,
-};
-pub use property::{PropertyMap, PropertyValue};
 pub use codegraph::CodeGraph;
+pub use property::{PropertyMap, PropertyValue};
+pub use types::{Direction, Edge, EdgeId, EdgeType, Node, NodeId, NodeType};

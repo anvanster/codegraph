@@ -31,7 +31,7 @@ codegraph does NOT include built-in language parsers. You integrate your own par
 - 115 tests with comprehensive coverage (39 lib + 70 integration/unit + 6 doctests)
 - Every public API is tested
 - Benchmarks ensure performance targets
-- 97% test coverage on core modules
+- 85% test coverage (983/1158 lines)
 
 ### 🪄 Zero Magic
 **"Explicit over implicit, always."**
@@ -137,7 +137,7 @@ Each layer:
 - **Schema-less Properties**: Flexible JSON properties on nodes and edges
 - **Efficient Queries**: O(1) neighbor lookups with adjacency indexing
 - **Explicit Operations**: No hidden behavior or magical conventions
-- **Comprehensive Tests**: 90%+ test coverage
+- **Comprehensive Tests**: 85% test coverage (983/1158 lines)
 - **Zero Unsafe Code**: Memory-safe by default
 
 ## What We Are (and Aren't)
@@ -195,6 +195,9 @@ cargo clippy -- -D warnings
 
 # Check test coverage
 cargo tarpaulin
+
+# Run all CI checks locally (recommended before pushing)
+./scripts/ci-checks.sh
 ```
 
 ## Examples
@@ -327,7 +330,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **v0.x**: API may change between minor versions (with deprecation warnings)
 - **v1.0+**: Stability guaranteed, breaking changes only in major versions
 
-Current version: **0.1.0** (Initial release)
+Current version: **0.1.1** (Initial release + formatting fixes)
 
 ## Support
 

@@ -1,7 +1,7 @@
 //! Main CodeGraph interface for graph operations.
 
-use super::types::{Direction, Edge, EdgeId, EdgeType, Node, NodeId, NodeType};
 use super::property::PropertyMap;
+use super::types::{Direction, Edge, EdgeId, EdgeType, Node, NodeId, NodeType};
 use crate::error::{GraphError, Result};
 use crate::storage::StorageBackend;
 use log::{debug, info, trace};
@@ -133,9 +133,11 @@ impl CodeGraph {
     ///
     /// Returns [`GraphError::NodeNotFound`] if the node doesn't exist.
     pub fn get_node_mut(&mut self, id: NodeId) -> Result<&mut Node> {
-        self.nodes.get_mut(&id).ok_or_else(|| GraphError::NodeNotFound {
-            node_id: id.to_string(),
-        })
+        self.nodes
+            .get_mut(&id)
+            .ok_or_else(|| GraphError::NodeNotFound {
+                node_id: id.to_string(),
+            })
     }
 
     /// Update properties of an existing node.
@@ -147,7 +149,7 @@ impl CodeGraph {
     /// Returns error if node not found or persistence fails.
     pub fn update_node_properties(&mut self, id: NodeId, properties: PropertyMap) -> Result<()> {
         let node = self.get_node_mut(id)?;
-        
+
         // Merge properties
         for (key, value) in properties.iter() {
             node.properties.insert(key.clone(), value.clone());
@@ -179,16 +181,20 @@ impl CodeGraph {
 
         // Find and delete all connected edges
         let mut edges_to_delete = Vec::new();
-        
+
         if let Some(out_edges) = self.adjacency_out.get(&id) {
             edges_to_delete.extend(out_edges.iter().copied());
         }
-        
+
         if let Some(in_edges) = self.adjacency_in.get(&id) {
             edges_to_delete.extend(in_edges.iter().copied());
         }
 
-        trace!("Deleting {} connected edges for node {}", edges_to_delete.len(), id);
+        trace!(
+            "Deleting {} connected edges for node {}",
+            edges_to_delete.len(),
+            id
+        );
         for edge_id in edges_to_delete {
             self.delete_edge(edge_id)?;
         }
@@ -276,9 +282,12 @@ impl CodeGraph {
     /// Returns error if edge not found or deletion fails.
     pub fn delete_edge(&mut self, id: EdgeId) -> Result<()> {
         debug!("Deleting edge: id={id}");
-        let edge = self.edges.get(&id).ok_or_else(|| GraphError::EdgeNotFound {
-            edge_id: id.to_string(),
-        })?;
+        let edge = self
+            .edges
+            .get(&id)
+            .ok_or_else(|| GraphError::EdgeNotFound {
+                edge_id: id.to_string(),
+            })?;
 
         let source_id = edge.source_id;
         let target_id = edge.target_id;
@@ -575,8 +584,9 @@ impl CodeGraph {
 
     fn load_counters(&mut self) -> Result<()> {
         if let Some(value) = self.storage.get(b"meta:counters")? {
-            let counters: serde_json::Value = serde_json::from_slice(&value)
-                .map_err(|e| GraphError::serialization("Failed to deserialize counters", Some(e)))?;
+            let counters: serde_json::Value = serde_json::from_slice(&value).map_err(|e| {
+                GraphError::serialization("Failed to deserialize counters", Some(e))
+            })?;
 
             if let Some(node_counter) = counters.get("node_counter").and_then(|v| v.as_u64()) {
                 self.node_counter = node_counter;
@@ -623,9 +633,9 @@ impl CodeGraph {
 
         Ok(())
     }
-    
+
     // ===== Algorithm Methods =====
-    
+
     /// Perform Breadth-First Search traversal from a starting node.
     ///
     /// Returns all reachable nodes within the specified depth limit.
@@ -637,10 +647,15 @@ impl CodeGraph {
     ///
     /// # Returns
     /// Vec of reachable node IDs (excluding the start node)
-    pub fn bfs(&self, start: NodeId, direction: Direction, max_depth: Option<usize>) -> Result<Vec<NodeId>> {
+    pub fn bfs(
+        &self,
+        start: NodeId,
+        direction: Direction,
+        max_depth: Option<usize>,
+    ) -> Result<Vec<NodeId>> {
         super::algorithms::bfs(self, start, direction, max_depth)
     }
-    
+
     /// Perform Depth-First Search traversal from a starting node.
     ///
     /// Uses an iterative approach to avoid stack overflow.
@@ -652,10 +667,15 @@ impl CodeGraph {
     ///
     /// # Returns
     /// Vec of reachable node IDs (excluding the start node)
-    pub fn dfs(&self, start: NodeId, direction: Direction, max_depth: Option<usize>) -> Result<Vec<NodeId>> {
+    pub fn dfs(
+        &self,
+        start: NodeId,
+        direction: Direction,
+        max_depth: Option<usize>,
+    ) -> Result<Vec<NodeId>> {
         super::algorithms::dfs(self, start, direction, max_depth)
     }
-    
+
     /// Find all strongly connected components (SCCs) using Tarjan's algorithm.
     ///
     /// Returns groups of nodes that form circular dependencies.
@@ -665,7 +685,7 @@ impl CodeGraph {
     pub fn find_strongly_connected_components(&self) -> Result<Vec<Vec<NodeId>>> {
         super::algorithms::find_strongly_connected_components(self)
     }
-    
+
     /// Find all paths between two nodes up to a maximum depth.
     ///
     /// # Parameters
@@ -675,12 +695,17 @@ impl CodeGraph {
     ///
     /// # Returns
     /// Vec of paths, where each path is a Vec of node IDs from start to end
-    pub fn find_all_paths(&self, start: NodeId, end: NodeId, max_depth: Option<usize>) -> Result<Vec<Vec<NodeId>>> {
+    pub fn find_all_paths(
+        &self,
+        start: NodeId,
+        end: NodeId,
+        max_depth: Option<usize>,
+    ) -> Result<Vec<Vec<NodeId>>> {
         super::algorithms::find_all_paths(self, start, end, max_depth)
     }
-    
+
     // ===== Export Methods =====
-    
+
     /// Export graph to Graphviz DOT format for visualization.
     ///
     /// **Warning**: Large graphs (>10K nodes) will produce warnings.
@@ -689,13 +714,13 @@ impl CodeGraph {
         self.check_export_size()?;
         crate::export::export_dot(self)
     }
-    
+
     /// Export graph to Graphviz DOT format with custom styling options.
     pub fn export_dot_styled(&self, options: crate::export::DotOptions) -> Result<String> {
         self.check_export_size()?;
         crate::export::export_dot_styled(self, options)
     }
-    
+
     /// Export graph to D3.js-compatible JSON format.
     ///
     /// **Warning**: Large graphs (>10K nodes) will produce warnings.
@@ -704,7 +729,7 @@ impl CodeGraph {
         self.check_export_size()?;
         crate::export::export_json(self)
     }
-    
+
     /// Export filtered subset of graph to JSON.
     pub fn export_json_filtered(
         &self,
@@ -713,7 +738,7 @@ impl CodeGraph {
     ) -> Result<String> {
         crate::export::export_json_filtered(self, node_filter, include_edges)
     }
-    
+
     /// Export nodes to CSV file.
     ///
     /// **Warning**: Large graphs (>10K nodes) will produce warnings.
@@ -722,7 +747,7 @@ impl CodeGraph {
         self.check_export_size()?;
         crate::export::export_csv_nodes(self, path)
     }
-    
+
     /// Export edges to CSV file.
     ///
     /// **Warning**: Large graphs (>10K nodes) will produce warnings.
@@ -731,13 +756,17 @@ impl CodeGraph {
         self.check_export_size()?;
         crate::export::export_csv_edges(self, path)
     }
-    
+
     /// Export both nodes and edges to separate CSV files (convenience method).
-    pub fn export_csv(&self, nodes_path: &std::path::Path, edges_path: &std::path::Path) -> Result<()> {
+    pub fn export_csv(
+        &self,
+        nodes_path: &std::path::Path,
+        edges_path: &std::path::Path,
+    ) -> Result<()> {
         self.check_export_size()?;
         crate::export::export_csv(self, nodes_path, edges_path)
     }
-    
+
     /// Export graph as RDF triples in N-Triples format.
     ///
     /// **Warning**: Large graphs (>10K nodes) will produce warnings.
@@ -746,11 +775,11 @@ impl CodeGraph {
         self.check_export_size()?;
         crate::export::export_triples(self)
     }
-    
+
     /// Check graph size for export operations and issue warnings/errors.
     fn check_export_size(&self) -> Result<()> {
         let node_count = self.node_count();
-        
+
         if node_count > 100_000 {
             return Err(GraphError::InvalidOperation {
                 message: format!(
@@ -758,14 +787,13 @@ impl CodeGraph {
                 ),
             });
         }
-        
+
         if node_count > 10_000 {
             eprintln!(
                 "Warning: Exporting large graph ({node_count} nodes). Consider filtering for better performance."
             );
         }
-        
+
         Ok(())
     }
 }
-

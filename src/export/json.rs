@@ -10,14 +10,14 @@ use std::collections::HashSet;
 pub fn export_json(graph: &CodeGraph) -> Result<String> {
     let mut nodes_array = Vec::new();
     let mut links_array = Vec::new();
-    
+
     // Export all nodes
     for node_id in 0..graph.node_count() as u64 {
         if let Ok(node) = graph.get_node(node_id) {
             nodes_array.push(node_to_json(node_id, node));
         }
     }
-    
+
     // Export all edges
     for edge_id in 0..graph.edge_count() as u64 {
         if let Ok(edge) = graph.get_edge(edge_id) {
@@ -30,12 +30,12 @@ pub fn export_json(graph: &CodeGraph) -> Result<String> {
             }));
         }
     }
-    
+
     let result = json!({
         "nodes": nodes_array,
         "links": links_array,
     });
-    
+
     // serde_json::to_string_pretty should never fail for our data structures
     Ok(serde_json::to_string_pretty(&result).expect("Failed to serialize JSON"))
 }
@@ -48,7 +48,7 @@ pub fn export_json_filtered(
 ) -> Result<String> {
     let mut nodes_array = Vec::new();
     let mut filtered_ids = HashSet::new();
-    
+
     // Export filtered nodes
     for node_id in 0..graph.node_count() as u64 {
         if let Ok(node) = graph.get_node(node_id) {
@@ -58,14 +58,15 @@ pub fn export_json_filtered(
             }
         }
     }
-    
+
     // Export edges if requested
     let mut links_array = Vec::new();
     if include_edges {
         for edge_id in 0..graph.edge_count() as u64 {
             if let Ok(edge) = graph.get_edge(edge_id) {
                 // Only include edges between filtered nodes
-                if filtered_ids.contains(&edge.source_id) && filtered_ids.contains(&edge.target_id) {
+                if filtered_ids.contains(&edge.source_id) && filtered_ids.contains(&edge.target_id)
+                {
                     links_array.push(json!({
                         "id": edge_id,
                         "source": edge.source_id,
@@ -77,12 +78,12 @@ pub fn export_json_filtered(
             }
         }
     }
-    
+
     let result = json!({
         "nodes": nodes_array,
         "links": links_array,
     });
-    
+
     // serde_json::to_string_pretty should never fail for our data structures
     Ok(serde_json::to_string_pretty(&result).expect("Failed to serialize JSON"))
 }
@@ -99,7 +100,7 @@ fn node_to_json(node_id: u64, node: &Node) -> Value {
 /// Convert PropertyMap to JSON object
 fn properties_to_json(props: &crate::PropertyMap) -> Value {
     let mut obj = serde_json::Map::new();
-    
+
     for (key, value) in props.iter() {
         let json_value = match value {
             crate::PropertyValue::String(s) => json!(s),
@@ -112,7 +113,7 @@ fn properties_to_json(props: &crate::PropertyMap) -> Value {
         };
         obj.insert(key.clone(), json_value);
     }
-    
+
     Value::Object(obj)
 }
 
@@ -120,13 +121,13 @@ fn properties_to_json(props: &crate::PropertyMap) -> Value {
 mod tests {
     use super::*;
     use crate::PropertyMap;
-    
+
     #[test]
     fn test_properties_to_json() {
         let mut props = PropertyMap::new();
         props.insert("name", "test");
         props.insert("count", 42);
-        
+
         let json = properties_to_json(&props);
         assert!(json.is_object());
         assert_eq!(json["name"], "test");

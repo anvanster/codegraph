@@ -64,10 +64,16 @@ fn main() -> codegraph::Result<()> {
     println!("\n--- Querying the graph ---\n");
 
     let file_node = graph.get_node(file_id)?;
-    println!("File node: {}", file_node.properties.get_string("path").unwrap_or("unknown"));
+    println!(
+        "File node: {}",
+        file_node.properties.get_string("path").unwrap_or("unknown")
+    );
 
     let neighbors = graph.get_neighbors(main_id, Direction::Outgoing)?;
-    println!("\nMain function calls/references {} entities:", neighbors.len());
+    println!(
+        "\nMain function calls/references {} entities:",
+        neighbors.len()
+    );
     for neighbor_id in &neighbors {
         let neighbor = graph.get_node(*neighbor_id)?;
         if let Some(name) = neighbor.properties.get_string("name") {
@@ -77,7 +83,10 @@ fn main() -> codegraph::Result<()> {
 
     // Get incoming edges (who calls main?)
     let callers = graph.get_neighbors(main_id, Direction::Incoming)?;
-    println!("\nMain function is contained in {} entities:", callers.len());
+    println!(
+        "\nMain function is contained in {} entities:",
+        callers.len()
+    );
     for caller_id in &callers {
         let caller = graph.get_node(*caller_id)?;
         println!("  - {:?}", caller.node_type);
@@ -88,7 +97,11 @@ fn main() -> codegraph::Result<()> {
     println!("\nEdges from main to helper: {}", edges.len());
     for edge_id in &edges {
         let edge = graph.get_edge(*edge_id)?;
-        println!("  - {} (line: {:?})", edge.edge_type, edge.properties.get_int("line"));
+        println!(
+            "  - {} (line: {:?})",
+            edge.edge_type,
+            edge.properties.get_int("line")
+        );
     }
 
     // Graph statistics

@@ -198,7 +198,7 @@ mod tests {
         let i: PropertyValue = 42i64.into();
         assert!(matches!(i, PropertyValue::Int(42)));
 
-        let f: PropertyValue = 3.14.into();
+        let f: PropertyValue = 2.5.into();
         assert!(matches!(f, PropertyValue::Float(_)));
 
         let b: PropertyValue = true.into();

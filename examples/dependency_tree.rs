@@ -3,7 +3,7 @@
 //! This example shows how to track file dependencies (imports) to understand
 //! which files depend on which other files.
 
-use codegraph::{CodeGraph, helpers};
+use codegraph::{helpers, CodeGraph};
 use std::path::Path;
 
 fn main() -> codegraph::Result<()> {
@@ -20,15 +20,25 @@ fn main() -> codegraph::Result<()> {
     let utils_file = helpers::add_file(&mut graph, "src/utils.rs", "rust")?;
     let model_file = helpers::add_file(&mut graph, "src/model.rs", "rust")?;
     let config_file = helpers::add_file(&mut graph, "src/config.rs", "rust")?;
-    
+
     println!("✓ Added 4 source files");
 
     // Build the dependency graph with imported symbols
     helpers::add_import(&mut graph, main_file, utils_file, vec!["helper", "process"])?;
-    helpers::add_import(&mut graph, main_file, model_file, vec!["Person", "Database"])?;
-    helpers::add_import(&mut graph, utils_file, config_file, vec!["Config", "load_config"])?;
+    helpers::add_import(
+        &mut graph,
+        main_file,
+        model_file,
+        vec!["Person", "Database"],
+    )?;
+    helpers::add_import(
+        &mut graph,
+        utils_file,
+        config_file,
+        vec!["Config", "load_config"],
+    )?;
     helpers::add_import(&mut graph, model_file, utils_file, vec!["validate"])?;
-    
+
     println!("✓ Added 4 import relationships\n");
 
     // Analyze dependencies
@@ -89,14 +99,16 @@ fn main() -> codegraph::Result<()> {
             if reverse_deps.contains(&file_id) {
                 let file = graph.get_node(file_id)?;
                 let dep = graph.get_node(dep_id)?;
-                if let (Some(file_path), Some(dep_path)) = 
-                    (file.properties.get_string("path"), dep.properties.get_string("path")) {
+                if let (Some(file_path), Some(dep_path)) = (
+                    file.properties.get_string("path"),
+                    dep.properties.get_string("path"),
+                ) {
                     circular.push(format!("{file_path} <-> {dep_path}"));
                 }
             }
         }
     }
-    
+
     if circular.is_empty() {
         println!("No circular dependencies found.");
     } else {

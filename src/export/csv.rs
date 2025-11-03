@@ -14,7 +14,7 @@ pub fn export_csv_nodes(graph: &CodeGraph, path: &Path) -> Result<()> {
         message: format!("Failed to create CSV file: {}", path.display()),
         source: Some(Box::new(e)),
     })?;
-    
+
     // Collect all property keys used in the graph
     let mut all_keys = HashSet::new();
     for node_id in 0..graph.node_count() as u64 {
@@ -24,10 +24,10 @@ pub fn export_csv_nodes(graph: &CodeGraph, path: &Path) -> Result<()> {
             }
         }
     }
-    
+
     let mut keys_vec: Vec<String> = all_keys.into_iter().collect();
     keys_vec.sort();
-    
+
     // Write header
     write!(file, "id,type").map_err(|e| crate::GraphError::Storage {
         message: "Failed to write CSV header".to_string(),
@@ -43,24 +43,28 @@ pub fn export_csv_nodes(graph: &CodeGraph, path: &Path) -> Result<()> {
         message: "Failed to write CSV header".to_string(),
         source: Some(Box::new(e)),
     })?;
-    
+
     // Write rows
     for node_id in 0..graph.node_count() as u64 {
         if let Ok(node) = graph.get_node(node_id) {
-            write!(file, "{},{:?}", node_id, node.node_type).map_err(|e| crate::GraphError::Storage {
-                message: "Failed to write CSV row".to_string(),
-                source: Some(Box::new(e)),
+            write!(file, "{},{:?}", node_id, node.node_type).map_err(|e| {
+                crate::GraphError::Storage {
+                    message: "Failed to write CSV row".to_string(),
+                    source: Some(Box::new(e)),
+                }
             })?;
-            
+
             for key in &keys_vec {
                 write!(file, ",").map_err(|e| crate::GraphError::Storage {
                     message: "Failed to write CSV row".to_string(),
                     source: Some(Box::new(e)),
                 })?;
                 if let Some(value) = node.properties.get(key) {
-                    write!(file, "{}", escape_csv(&format_property_value(value))).map_err(|e| crate::GraphError::Storage {
-                        message: "Failed to write CSV row".to_string(),
-                        source: Some(Box::new(e)),
+                    write!(file, "{}", escape_csv(&format_property_value(value))).map_err(|e| {
+                        crate::GraphError::Storage {
+                            message: "Failed to write CSV row".to_string(),
+                            source: Some(Box::new(e)),
+                        }
                     })?;
                 }
             }
@@ -70,7 +74,7 @@ pub fn export_csv_nodes(graph: &CodeGraph, path: &Path) -> Result<()> {
             })?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -80,7 +84,7 @@ pub fn export_csv_edges(graph: &CodeGraph, path: &Path) -> Result<()> {
         message: format!("Failed to create CSV file: {}", path.display()),
         source: Some(Box::new(e)),
     })?;
-    
+
     // Collect all property keys used in edges
     let mut all_keys = HashSet::new();
     for edge_id in 0..graph.edge_count() as u64 {
@@ -90,10 +94,10 @@ pub fn export_csv_edges(graph: &CodeGraph, path: &Path) -> Result<()> {
             }
         }
     }
-    
+
     let mut keys_vec: Vec<String> = all_keys.into_iter().collect();
     keys_vec.sort();
-    
+
     // Write header
     write!(file, "id,source,target,type").map_err(|e| crate::GraphError::Storage {
         message: "Failed to write CSV header".to_string(),
@@ -109,24 +113,31 @@ pub fn export_csv_edges(graph: &CodeGraph, path: &Path) -> Result<()> {
         message: "Failed to write CSV header".to_string(),
         source: Some(Box::new(e)),
     })?;
-    
+
     // Write rows
     for edge_id in 0..graph.edge_count() as u64 {
         if let Ok(edge) = graph.get_edge(edge_id) {
-            write!(file, "{},{},{},{:?}", edge_id, edge.source_id, edge.target_id, edge.edge_type).map_err(|e| crate::GraphError::Storage {
+            write!(
+                file,
+                "{},{},{},{:?}",
+                edge_id, edge.source_id, edge.target_id, edge.edge_type
+            )
+            .map_err(|e| crate::GraphError::Storage {
                 message: "Failed to write CSV row".to_string(),
                 source: Some(Box::new(e)),
             })?;
-            
+
             for key in &keys_vec {
                 write!(file, ",").map_err(|e| crate::GraphError::Storage {
                     message: "Failed to write CSV row".to_string(),
                     source: Some(Box::new(e)),
                 })?;
                 if let Some(value) = edge.properties.get(key) {
-                    write!(file, "{}", escape_csv(&format_property_value(value))).map_err(|e| crate::GraphError::Storage {
-                        message: "Failed to write CSV row".to_string(),
-                        source: Some(Box::new(e)),
+                    write!(file, "{}", escape_csv(&format_property_value(value))).map_err(|e| {
+                        crate::GraphError::Storage {
+                            message: "Failed to write CSV row".to_string(),
+                            source: Some(Box::new(e)),
+                        }
                     })?;
                 }
             }
@@ -136,7 +147,7 @@ pub fn export_csv_edges(graph: &CodeGraph, path: &Path) -> Result<()> {
             })?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -155,7 +166,11 @@ fn format_property_value(value: &crate::PropertyValue) -> String {
         crate::PropertyValue::Float(f) => f.to_string(),
         crate::PropertyValue::Bool(b) => b.to_string(),
         crate::PropertyValue::StringList(v) => v.join(";"),
-        crate::PropertyValue::IntList(v) => v.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(";"),
+        crate::PropertyValue::IntList(v) => v
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(";"),
         crate::PropertyValue::Null => String::new(),
     }
 }
@@ -172,7 +187,7 @@ fn escape_csv(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_escape_csv() {
         assert_eq!(escape_csv("hello"), "hello");

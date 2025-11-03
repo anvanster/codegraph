@@ -1,8 +1,5 @@
 /.specify/
 /specs/
-# Common Rust ignores
-/target/
-/**/*.rs.bk
 # Rust build artifacts
 target/
 output/

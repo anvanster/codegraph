@@ -2,7 +2,7 @@
 //!
 //! Generates Graphviz DOT format for rendering graphs as images or interactive visualizations.
 
-use crate::{CodeGraph, NodeType, EdgeType, Result};
+use crate::{CodeGraph, EdgeType, NodeType, Result};
 use std::collections::HashMap;
 
 /// Options for styling DOT export
@@ -29,7 +29,7 @@ impl Default for DotOptions {
         node_colors.insert(NodeType::Variable, "#CE93D8".to_string());
         node_colors.insert(NodeType::Interface, "#FFAB91".to_string());
         node_colors.insert(NodeType::Module, "#BCAAA4".to_string());
-        
+
         let mut node_shapes = HashMap::new();
         node_shapes.insert(NodeType::CodeFile, "folder".to_string());
         node_shapes.insert(NodeType::Function, "box".to_string());
@@ -37,7 +37,7 @@ impl Default for DotOptions {
         node_shapes.insert(NodeType::Variable, "ellipse".to_string());
         node_shapes.insert(NodeType::Interface, "diamond".to_string());
         node_shapes.insert(NodeType::Module, "folder".to_string());
-        
+
         DotOptions {
             node_colors,
             edge_colors: HashMap::new(),
@@ -56,12 +56,12 @@ pub fn export_dot(graph: &CodeGraph) -> Result<String> {
 /// Export graph to Graphviz DOT format with custom styling
 pub fn export_dot_styled(graph: &CodeGraph, options: DotOptions) -> Result<String> {
     let mut output = String::new();
-    
+
     // Header
     output.push_str("digraph code_graph {\n");
     output.push_str(&format!("    rankdir={};\n", options.rankdir));
     output.push_str("    node [style=filled];\n\n");
-    
+
     // Export nodes - iterate through all node IDs
     for node_id in 0..graph.node_count() as u64 {
         if let Ok(node) = graph.get_node(node_id) {
@@ -73,49 +73,59 @@ pub fn export_dot_styled(graph: &CodeGraph, options: DotOptions) -> Result<Strin
             } else {
                 format!("n{node_id}")
             };
-            
+
             // Add properties to label if requested
             for prop_name in &options.show_properties {
                 if let Some(value) = node.properties.get(prop_name) {
-                    label.push_str(&format!("\\n{}:{}", prop_name, format_property_value(value)));
+                    label.push_str(&format!(
+                        "\\n{}:{}",
+                        prop_name,
+                        format_property_value(value)
+                    ));
                 }
             }
-            
+
             // Get styling
-            let color = options.node_colors.get(&node.node_type)
+            let color = options
+                .node_colors
+                .get(&node.node_type)
                 .map(|s| s.as_str())
                 .unwrap_or("#FFFFFF");
-            
-            let shape = options.node_shapes.get(&node.node_type)
+
+            let shape = options
+                .node_shapes
+                .get(&node.node_type)
                 .map(|s| s.as_str())
                 .unwrap_or("box");
-            
+
             output.push_str(&format!(
                 "    n{node_id} [label=\"{label}\", shape={shape}, fillcolor=\"{color}\"];\n"
             ));
         }
     }
-    
+
     output.push('\n');
-    
+
     // Export edges - iterate through all edge IDs
     for edge_id in 0..graph.edge_count() as u64 {
         if let Ok(edge) = graph.get_edge(edge_id) {
             let edge_label = format!("{:?}", edge.edge_type);
-            
-            let color = options.edge_colors.get(&edge.edge_type)
+
+            let color = options
+                .edge_colors
+                .get(&edge.edge_type)
                 .map(|c| format!(", color=\"{c}\""))
                 .unwrap_or_default();
-            
+
             output.push_str(&format!(
                 "    n{} -> n{} [label=\"{}\"{}];\n",
                 edge.source_id, edge.target_id, edge_label, color
             ));
         }
     }
-    
+
     output.push_str("}\n");
-    
+
     Ok(output)
 }
 
@@ -134,7 +144,11 @@ fn format_property_value(value: &crate::PropertyValue) -> String {
         crate::PropertyValue::Float(f) => f.to_string(),
         crate::PropertyValue::Bool(b) => b.to_string(),
         crate::PropertyValue::StringList(v) => v.join(","),
-        crate::PropertyValue::IntList(v) => v.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","),
+        crate::PropertyValue::IntList(v) => v
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
         crate::PropertyValue::Null => "null".to_string(),
     }
 }
@@ -142,7 +156,7 @@ fn format_property_value(value: &crate::PropertyValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_escape_dot_label() {
         assert_eq!(escape_dot_label("hello"), "hello");

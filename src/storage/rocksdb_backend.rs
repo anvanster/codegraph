@@ -103,9 +103,8 @@ impl StorageBackend for RocksDBBackend {
         let iter = self.db.prefix_iterator(prefix);
 
         for item in iter {
-            let (key, value) = item.map_err(|e| {
-                GraphError::storage("Failed to iterate over prefix", Some(e))
-            })?;
+            let (key, value) =
+                item.map_err(|e| GraphError::storage("Failed to iterate over prefix", Some(e)))?;
 
             // RocksDB prefix iterator may return keys beyond the prefix
             // so we need to check explicitly
@@ -276,9 +275,6 @@ mod tests {
 
         // Reopen the database
         let backend = RocksDBBackend::open(&path).unwrap();
-        assert_eq!(
-            backend.get(b"persistent").unwrap(),
-            Some(b"data".to_vec())
-        );
+        assert_eq!(backend.get(b"persistent").unwrap(), Some(b"data".to_vec()));
     }
 }

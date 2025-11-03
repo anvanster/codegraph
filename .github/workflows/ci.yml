@@ -115,27 +115,18 @@ jobs:
         run: |
           cat > benches/graph_benchmarks.rs << 'EOF'
           use criterion::{criterion_group, criterion_main, Criterion};
-          use codegraph::{CodeGraph, Node, NodeType, Edge, EdgeType};
-
-          fn node_operations(c: &mut Criterion) {
-              c.bench_function("node_creation", |b| {
-                  b.iter(|| {
-                      Node::new(NodeType::Function)
-                  })
-              });
-          }
+          use codegraph::{CodeGraph, NodeType, PropertyMap};
 
           fn graph_operations(c: &mut Criterion) {
               c.bench_function("add_node", |b| {
                   b.iter(|| {
                       let mut graph = CodeGraph::in_memory().unwrap();
-                      let node = Node::new(NodeType::Function);
-                      graph.add_node(node).unwrap();
+                      graph.add_node(NodeType::Function, PropertyMap::new()).unwrap();
                   })
               });
           }
 
-          criterion_group!(benches, node_operations, graph_operations);
+          criterion_group!(benches, graph_operations);
           criterion_main!(benches);
           EOF
       

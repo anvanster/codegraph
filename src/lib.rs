@@ -46,14 +46,17 @@
 #![deny(unsafe_code)]
 
 pub mod error;
-pub mod storage;
-pub mod graph;
-pub mod query;
-pub mod helpers;
 pub mod export;
+pub mod graph;
+pub mod helpers;
+pub mod query;
+pub mod storage;
 
 // Re-export main types
 pub use error::{GraphError, Result};
-pub use graph::{CodeGraph, Node, Edge, NodeType, EdgeType, NodeId, EdgeId, Direction, PropertyMap, PropertyValue};
-pub use storage::{StorageBackend, RocksDBBackend, MemoryBackend};
+pub use graph::{
+    CodeGraph, Direction, Edge, EdgeId, EdgeType, Node, NodeId, NodeType, PropertyMap,
+    PropertyValue,
+};
 pub use query::QueryBuilder;
+pub use storage::{MemoryBackend, RocksDBBackend, StorageBackend};

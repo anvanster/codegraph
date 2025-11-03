@@ -33,14 +33,14 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if the write fails.
+    /// Returns an error if the write fails.
     fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
 
     /// Retrieve a value by key.
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if the read fails.
+    /// Returns an error if the read fails.
     /// Returns `Ok(None)` if the key doesn't exist.
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 
@@ -48,7 +48,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if the delete fails.
+    /// Returns an error if the delete fails.
     /// Does not error if the key doesn't exist (idempotent).
     fn delete(&mut self, key: &[u8]) -> Result<()>;
 
@@ -56,7 +56,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if the check fails.
+    /// Returns an error if the check fails.
     fn exists(&self, key: &[u8]) -> Result<bool>;
 
     /// Iterate over all key-value pairs with keys starting with the given prefix.
@@ -65,7 +65,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if iteration setup fails.
+    /// Returns an error if iteration setup fails.
     fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<KeyValue>>;
 
     /// Execute a batch of write operations atomically.
@@ -74,7 +74,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if any operation in the batch fails.
+    /// Returns an error if any operation in the batch fails.
     fn write_batch(&mut self, operations: Vec<BatchOperation>) -> Result<()>;
 
     /// Flush any buffered writes to disk.
@@ -83,7 +83,7 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`GraphError::Storage`] if flush fails.
+    /// Returns an error if flush fails.
     fn flush(&mut self) -> Result<()>;
 }
 

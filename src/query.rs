@@ -64,7 +64,8 @@ impl<'a> QueryBuilder<'a> {
     /// # }
     /// ```
     pub fn node_type(mut self, node_type: NodeType) -> Self {
-        self.filters.push(Box::new(move |node| node.node_type == node_type));
+        self.filters
+            .push(Box::new(move |node| node.node_type == node_type));
         self
     }
 
@@ -103,13 +104,15 @@ impl<'a> QueryBuilder<'a> {
     pub fn property<V: Into<PropertyValue>>(mut self, key: &str, value: V) -> Self {
         let key = key.to_string();
         let value = value.into();
-        
+
         self.filters.push(Box::new(move |node| {
             if let Some(prop_value) = node.properties.get(&key) {
                 match (&value, prop_value) {
                     (PropertyValue::String(v1), PropertyValue::String(v2)) => v1 == v2,
                     (PropertyValue::Int(v1), PropertyValue::Int(v2)) => v1 == v2,
-                    (PropertyValue::Float(v1), PropertyValue::Float(v2)) => (v1 - v2).abs() < f64::EPSILON,
+                    (PropertyValue::Float(v1), PropertyValue::Float(v2)) => {
+                        (v1 - v2).abs() < f64::EPSILON
+                    }
                     (PropertyValue::Bool(v1), PropertyValue::Bool(v2)) => v1 == v2,
                     _ => false,
                 }
@@ -123,9 +126,8 @@ impl<'a> QueryBuilder<'a> {
     /// Filter nodes that have a specific property (regardless of value).
     pub fn property_exists(mut self, key: &str) -> Self {
         let key = key.to_string();
-        self.filters.push(Box::new(move |node| {
-            node.properties.contains_key(&key)
-        }));
+        self.filters
+            .push(Box::new(move |node| node.properties.contains_key(&key)));
         self
     }
 
@@ -283,7 +285,7 @@ impl<'a> QueryBuilder<'a> {
                 }
             }
         }
-        
+
         // File not found
         Ok(Vec::new())
     }
@@ -298,18 +300,18 @@ impl<'a> QueryBuilder<'a> {
 ///
 /// Supports * (any characters) and ** (directories).
 fn glob_match(pattern: &str, path: &str) -> bool {
-    // Handle ** for directory matching  
+    // Handle ** for directory matching
     if pattern.contains("**") {
         let parts: Vec<&str> = pattern.split("**").collect();
         if parts.len() == 2 {
             let prefix = parts[0];
             let suffix = parts[1].trim_start_matches('/');
-            
+
             // Check prefix
             if !prefix.is_empty() && !path.starts_with(prefix) {
                 return false;
             }
-            
+
             // If suffix contains *, we need to handle it recursively
             if suffix.contains('*') {
                 // Get the part after the last /
@@ -320,7 +322,7 @@ fn glob_match(pattern: &str, path: &str) -> bool {
                     return glob_match(suffix, path);
                 }
             }
-            
+
             // Simple suffix match
             if !suffix.is_empty() && !path.ends_with(suffix) {
                 return false;
@@ -343,7 +345,7 @@ fn glob_match(pattern: &str, path: &str) -> bool {
             // Empty part from consecutive * or at start/end
             continue;
         }
-        
+
         if i == 0 {
             // First part must match start
             if !path[pos..].starts_with(part) {
@@ -372,9 +374,9 @@ fn glob_match(pattern: &str, path: &str) -> bool {
 fn regex_match(pattern: &str, text: &str) -> bool {
     let starts_with = pattern.starts_with('^');
     let ends_with = pattern.ends_with('$');
-    
+
     let pattern = pattern.trim_start_matches('^').trim_end_matches('$');
-    
+
     if starts_with && ends_with {
         text == pattern
     } else if starts_with {

@@ -7,6 +7,24 @@
 use crate::error::Result;
 use crate::graph::{CodeGraph, Direction, EdgeId, EdgeType, NodeId, NodeType, PropertyMap};
 
+/// Metadata for a function with extended properties.
+pub struct FunctionMetadata<'a> {
+    /// Function name
+    pub name: &'a str,
+    /// Starting line number
+    pub line_start: i64,
+    /// Ending line number
+    pub line_end: i64,
+    /// Visibility modifier (e.g., "public", "private")
+    pub visibility: &'a str,
+    /// Function signature string
+    pub signature: &'a str,
+    /// Whether the function is async
+    pub is_async: bool,
+    /// Whether the function is a test
+    pub is_test: bool,
+}
+
 /// Add a file node to the graph.
 ///
 /// Creates a CodeFile node with path and language properties.
@@ -24,7 +42,7 @@ pub fn add_file(graph: &mut CodeGraph, path: &str, language: &str) -> Result<Nod
     let props = PropertyMap::new()
         .with("path", path)
         .with("language", language);
-    
+
     graph.add_node(NodeType::CodeFile, props)
 }
 
@@ -54,12 +72,12 @@ pub fn add_function(
         .with("name", name)
         .with("line_start", line_start)
         .with("line_end", line_end);
-    
+
     let func_id = graph.add_node(NodeType::Function, props)?;
-    
+
     // Auto-create Contains edge
     graph.add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())?;
-    
+
     Ok(func_id)
 }
 
@@ -71,13 +89,7 @@ pub fn add_function(
 ///
 /// * `graph` - The code graph
 /// * `file_id` - The ID of the file containing this function
-/// * `name` - Function name
-/// * `line_start` - Starting line number
-/// * `line_end` - Ending line number
-/// * `visibility` - Visibility modifier (e.g., "public", "private")
-/// * `signature` - Function signature string
-/// * `is_async` - Whether the function is async
-/// * `is_test` - Whether the function is a test
+/// * `metadata` - Function metadata including name, lines, visibility, etc.
 ///
 /// # Returns
 ///
@@ -85,28 +97,22 @@ pub fn add_function(
 pub fn add_function_with_metadata(
     graph: &mut CodeGraph,
     file_id: NodeId,
-    name: &str,
-    line_start: i64,
-    line_end: i64,
-    visibility: &str,
-    signature: &str,
-    is_async: bool,
-    is_test: bool,
+    metadata: FunctionMetadata,
 ) -> Result<NodeId> {
     let props = PropertyMap::new()
-        .with("name", name)
-        .with("line_start", line_start)
-        .with("line_end", line_end)
-        .with("visibility", visibility)
-        .with("signature", signature)
-        .with("is_async", is_async)
-        .with("is_test", is_test);
-    
+        .with("name", metadata.name)
+        .with("line_start", metadata.line_start)
+        .with("line_end", metadata.line_end)
+        .with("visibility", metadata.visibility)
+        .with("signature", metadata.signature)
+        .with("is_async", metadata.is_async)
+        .with("is_test", metadata.is_test);
+
     let func_id = graph.add_node(NodeType::Function, props)?;
-    
+
     // Auto-create Contains edge
     graph.add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())?;
-    
+
     Ok(func_id)
 }
 
@@ -136,12 +142,12 @@ pub fn add_class(
         .with("name", name)
         .with("line_start", line_start)
         .with("line_end", line_end);
-    
+
     let class_id = graph.add_node(NodeType::Class, props)?;
-    
+
     // Auto-create Contains edge
     graph.add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())?;
-    
+
     Ok(class_id)
 }
 
@@ -171,12 +177,12 @@ pub fn add_method(
         .with("name", name)
         .with("line_start", line_start)
         .with("line_end", line_end);
-    
+
     let method_id = graph.add_node(NodeType::Function, props)?;
-    
+
     // Link to class
     graph.add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())?;
-    
+
     Ok(method_id)
 }
 
@@ -194,10 +200,8 @@ pub fn add_method(
 ///
 /// The ID of the created module node.
 pub fn add_module(graph: &mut CodeGraph, name: &str, path: &str) -> Result<NodeId> {
-    let props = PropertyMap::new()
-        .with("name", name)
-        .with("path", path);
-    
+    let props = PropertyMap::new().with("name", name).with("path", path);
+
     graph.add_node(NodeType::Module, props)
 }
 
@@ -268,7 +272,12 @@ pub fn link_to_file(
     container_id: NodeId,
     contained_id: NodeId,
 ) -> Result<EdgeId> {
-    graph.add_edge(container_id, contained_id, EdgeType::Contains, PropertyMap::new())
+    graph.add_edge(
+        container_id,
+        contained_id,
+        EdgeType::Contains,
+        PropertyMap::new(),
+    )
 }
 
 /// Get all functions that call the given function.
@@ -285,7 +294,7 @@ pub fn link_to_file(
 /// Vector of node IDs of functions that call this function.
 pub fn get_callers(graph: &CodeGraph, function_id: NodeId) -> Result<Vec<NodeId>> {
     let incoming = graph.get_neighbors(function_id, Direction::Incoming)?;
-    
+
     let mut callers = Vec::new();
     for neighbor_id in incoming {
         // Check if the edge is a Calls edge
@@ -298,7 +307,7 @@ pub fn get_callers(graph: &CodeGraph, function_id: NodeId) -> Result<Vec<NodeId>
             }
         }
     }
-    
+
     Ok(callers)
 }
 
@@ -316,7 +325,7 @@ pub fn get_callers(graph: &CodeGraph, function_id: NodeId) -> Result<Vec<NodeId>
 /// Vector of node IDs of functions called by this function.
 pub fn get_callees(graph: &CodeGraph, function_id: NodeId) -> Result<Vec<NodeId>> {
     let outgoing = graph.get_neighbors(function_id, Direction::Outgoing)?;
-    
+
     let mut callees = Vec::new();
     for neighbor_id in outgoing {
         // Check if the edge is a Calls edge
@@ -329,7 +338,7 @@ pub fn get_callees(graph: &CodeGraph, function_id: NodeId) -> Result<Vec<NodeId>
             }
         }
     }
-    
+
     Ok(callees)
 }
 
@@ -347,7 +356,7 @@ pub fn get_callees(graph: &CodeGraph, function_id: NodeId) -> Result<Vec<NodeId>
 /// Vector of node IDs of functions in this file.
 pub fn get_functions_in_file(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<NodeId>> {
     let contained = graph.get_neighbors(file_id, Direction::Outgoing)?;
-    
+
     let mut functions = Vec::new();
     for node_id in contained {
         let node = graph.get_node(node_id)?;
@@ -356,7 +365,7 @@ pub fn get_functions_in_file(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<N
             functions.push(node_id);
         }
     }
-    
+
     Ok(functions)
 }
 
@@ -374,7 +383,7 @@ pub fn get_functions_in_file(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<N
 /// Vector of node IDs of files that this file imports.
 pub fn get_file_dependencies(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<NodeId>> {
     let outgoing = graph.get_neighbors(file_id, Direction::Outgoing)?;
-    
+
     let mut dependencies = Vec::new();
     for neighbor_id in outgoing {
         // Check if the edge is Imports or ImportsFrom
@@ -387,7 +396,7 @@ pub fn get_file_dependencies(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<N
             }
         }
     }
-    
+
     Ok(dependencies)
 }
 
@@ -405,7 +414,7 @@ pub fn get_file_dependencies(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<N
 /// Vector of node IDs of files that import this file.
 pub fn get_file_dependents(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<NodeId>> {
     let incoming = graph.get_neighbors(file_id, Direction::Incoming)?;
-    
+
     let mut dependents = Vec::new();
     for neighbor_id in incoming {
         // Check if the edge is Imports or ImportsFrom
@@ -418,7 +427,7 @@ pub fn get_file_dependents(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<Nod
             }
         }
     }
-    
+
     Ok(dependents)
 }
 
@@ -444,14 +453,14 @@ pub fn transitive_dependencies(
     max_depth: Option<usize>,
 ) -> Result<Vec<NodeId>> {
     use std::collections::{HashSet, VecDeque};
-    
+
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
     let mut result = Vec::new();
-    
+
     visited.insert(file_id);
     queue.push_back((file_id, 0));
-    
+
     while let Some((current, depth)) = queue.pop_front() {
         // Check depth limit
         if let Some(max) = max_depth {
@@ -459,10 +468,10 @@ pub fn transitive_dependencies(
                 continue;
             }
         }
-        
+
         // Get direct dependencies
         let deps = get_file_dependencies(graph, current)?;
-        
+
         for dep_id in deps {
             if !visited.contains(&dep_id) {
                 visited.insert(dep_id);
@@ -471,7 +480,7 @@ pub fn transitive_dependencies(
             }
         }
     }
-    
+
     Ok(result)
 }
 
@@ -495,14 +504,14 @@ pub fn transitive_dependents(
     max_depth: Option<usize>,
 ) -> Result<Vec<NodeId>> {
     use std::collections::{HashSet, VecDeque};
-    
+
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
     let mut result = Vec::new();
-    
+
     visited.insert(file_id);
     queue.push_back((file_id, 0));
-    
+
     while let Some((current, depth)) = queue.pop_front() {
         // Check depth limit
         if let Some(max) = max_depth {
@@ -510,10 +519,10 @@ pub fn transitive_dependents(
                 continue;
             }
         }
-        
+
         // Get direct dependents
         let dependents = get_file_dependents(graph, current)?;
-        
+
         for dependent_id in dependents {
             if !visited.contains(&dependent_id) {
                 visited.insert(dependent_id);
@@ -522,7 +531,7 @@ pub fn transitive_dependents(
             }
         }
     }
-    
+
     Ok(result)
 }
 
@@ -566,10 +575,10 @@ pub fn call_chain(
 pub fn circular_deps(graph: &CodeGraph) -> Result<Vec<Vec<NodeId>>> {
     // Find all SCCs in the graph
     let sccs = graph.find_strongly_connected_components()?;
-    
+
     // Filter to only include SCCs that contain CodeFile nodes
     let mut file_cycles = Vec::new();
-    
+
     for scc in sccs {
         // Check if this SCC contains file nodes
         let mut file_nodes = Vec::new();
@@ -580,12 +589,12 @@ pub fn circular_deps(graph: &CodeGraph) -> Result<Vec<Vec<NodeId>>> {
                 }
             }
         }
-        
+
         // If we found file nodes in this SCC, it's a circular dependency
         if file_nodes.len() > 1 {
             file_cycles.push(file_nodes);
         }
     }
-    
+
     Ok(file_cycles)
 }

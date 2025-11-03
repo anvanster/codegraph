@@ -119,7 +119,7 @@ mod tests {
     fn test_put_and_get() {
         let mut backend = MemoryBackend::new();
         backend.put(b"key1", b"value1").unwrap();
-        
+
         let value = backend.get(b"key1").unwrap();
         assert_eq!(value, Some(b"value1".to_vec()));
     }
@@ -233,7 +233,7 @@ mod tests {
     fn test_flush_is_noop() {
         let mut backend = MemoryBackend::new();
         backend.put(b"key1", b"value1").unwrap();
-        
+
         // Should not error or change state
         backend.flush().unwrap();
         assert_eq!(backend.get(b"key1").unwrap(), Some(b"value1".to_vec()));

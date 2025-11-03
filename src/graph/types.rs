@@ -1,7 +1,7 @@
 //! Core graph types: nodes, edges, IDs, and enums.
 
-use serde::{Deserialize, Serialize};
 use super::property::{PropertyMap, PropertyValue};
+use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a node (monotonic counter).
 pub type NodeId = u64;

@@ -206,7 +206,7 @@ Dual-licensed under MIT or Apache-2.0 (your choice).
 
 ---
 
-**Status**: ✅ **READY FOR INITIAL RELEASE (v0.1.0)**
+**Status**: ✅ **READY FOR INITIAL RELEASE (v0.1.1)**
 
 All constitutional requirements met. All tests passing. Documentation complete.
 Ready for community feedback and contributions.

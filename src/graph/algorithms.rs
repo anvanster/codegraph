@@ -28,10 +28,10 @@ pub fn bfs(
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
     let mut result = Vec::new();
-    
+
     visited.insert(start);
     queue.push_back((start, 0)); // (node_id, depth)
-    
+
     while let Some((current, depth)) = queue.pop_front() {
         // Check depth limit
         if let Some(max) = max_depth {
@@ -39,10 +39,10 @@ pub fn bfs(
                 continue;
             }
         }
-        
+
         // Get neighbors
         let neighbors = graph.get_neighbors(current, direction)?;
-        
+
         for neighbor_id in neighbors {
             if !visited.contains(&neighbor_id) {
                 visited.insert(neighbor_id);
@@ -51,7 +51,7 @@ pub fn bfs(
             }
         }
     }
-    
+
     Ok(result)
 }
 
@@ -76,10 +76,10 @@ pub fn dfs(
     let mut visited = HashSet::new();
     let mut stack = Vec::new();
     let mut result = Vec::new();
-    
+
     visited.insert(start);
     stack.push((start, 0)); // (node_id, depth)
-    
+
     while let Some((current, depth)) = stack.pop() {
         // Check depth limit
         if let Some(max) = max_depth {
@@ -87,10 +87,10 @@ pub fn dfs(
                 continue;
             }
         }
-        
+
         // Get neighbors
         let neighbors = graph.get_neighbors(current, direction)?;
-        
+
         for neighbor_id in neighbors {
             if !visited.contains(&neighbor_id) {
                 visited.insert(neighbor_id);
@@ -99,7 +99,7 @@ pub fn dfs(
             }
         }
     }
-    
+
     Ok(result)
 }
 
@@ -121,7 +121,7 @@ pub fn find_strongly_connected_components(graph: &CodeGraph) -> Result<Vec<Vec<N
     let mut lowlinks: HashMap<NodeId, usize> = HashMap::new();
     let mut on_stack: HashSet<NodeId> = HashSet::new();
     let mut sccs = Vec::new();
-    
+
     // Process all nodes to handle disconnected components
     for node_id in 0..graph.node_count() as u64 {
         if graph.get_node(node_id).is_ok() && !indices.contains_key(&node_id) {
@@ -137,12 +137,13 @@ pub fn find_strongly_connected_components(graph: &CodeGraph) -> Result<Vec<Vec<N
             )?;
         }
     }
-    
+
     // Filter to only return SCCs with more than one node (actual cycles)
     Ok(sccs.into_iter().filter(|scc| scc.len() > 1).collect())
 }
 
 /// Helper function for Tarjan's algorithm
+#[allow(clippy::too_many_arguments)]
 fn strongconnect(
     graph: &CodeGraph,
     v: NodeId,
@@ -158,7 +159,7 @@ fn strongconnect(
     *index += 1;
     stack.push(v);
     on_stack.insert(v);
-    
+
     // Consider successors of v
     let neighbors = graph.get_neighbors(v, Direction::Outgoing)?;
     for w in neighbors {
@@ -175,7 +176,7 @@ fn strongconnect(
             lowlinks.insert(v, v_lowlink.min(w_index));
         }
     }
-    
+
     // If v is a root node, pop the stack and generate an SCC
     if lowlinks.get(&v) == indices.get(&v) {
         let mut scc = Vec::new();
@@ -189,7 +190,7 @@ fn strongconnect(
         }
         sccs.push(scc);
     }
-    
+
     Ok(())
 }
 
@@ -217,7 +218,7 @@ pub fn find_all_paths(
     let mut current_path = vec![start];
     let mut visited = HashSet::new();
     visited.insert(start);
-    
+
     find_paths_recursive(
         graph,
         start,
@@ -227,7 +228,7 @@ pub fn find_all_paths(
         &mut paths,
         max_depth,
     )?;
-    
+
     Ok(paths)
 }
 
@@ -245,27 +246,35 @@ fn find_paths_recursive(
     if current_path.len() >= max_depth {
         return Ok(());
     }
-    
+
     // Check if we reached the target
     if current == end {
         paths.push(current_path.clone());
         return Ok(());
     }
-    
+
     // Explore neighbors
     let neighbors = graph.get_neighbors(current, Direction::Outgoing)?;
     for neighbor in neighbors {
         if !visited.contains(&neighbor) {
             visited.insert(neighbor);
             current_path.push(neighbor);
-            
-            find_paths_recursive(graph, neighbor, end, current_path, visited, paths, max_depth)?;
-            
+
+            find_paths_recursive(
+                graph,
+                neighbor,
+                end,
+                current_path,
+                visited,
+                paths,
+                max_depth,
+            )?;
+
             current_path.pop();
             visited.remove(&neighbor);
         }
     }
-    
+
     Ok(())
 }
 
@@ -273,33 +282,33 @@ fn find_paths_recursive(
 mod tests {
     use super::*;
     use crate::helpers;
-    
+
     #[test]
     fn test_bfs_simple_chain() {
         let mut graph = CodeGraph::in_memory().unwrap();
         let a = helpers::add_file(&mut graph, "a.py", "python").unwrap();
         let b = helpers::add_file(&mut graph, "b.py", "python").unwrap();
         let c = helpers::add_file(&mut graph, "c.py", "python").unwrap();
-        
+
         helpers::add_import(&mut graph, a, b, vec![]).unwrap();
         helpers::add_import(&mut graph, b, c, vec![]).unwrap();
-        
+
         let result = bfs(&graph, a, Direction::Outgoing, None).unwrap();
         assert_eq!(result.len(), 2);
         assert!(result.contains(&b));
         assert!(result.contains(&c));
     }
-    
+
     #[test]
     fn test_dfs_simple_chain() {
         let mut graph = CodeGraph::in_memory().unwrap();
         let a = helpers::add_file(&mut graph, "a.py", "python").unwrap();
         let b = helpers::add_file(&mut graph, "b.py", "python").unwrap();
         let c = helpers::add_file(&mut graph, "c.py", "python").unwrap();
-        
+
         helpers::add_import(&mut graph, a, b, vec![]).unwrap();
         helpers::add_import(&mut graph, b, c, vec![]).unwrap();
-        
+
         let result = dfs(&graph, a, Direction::Outgoing, None).unwrap();
         assert_eq!(result.len(), 2);
     }
