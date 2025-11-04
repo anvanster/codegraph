@@ -1,44 +1,30 @@
-[package]
-name = "codegraph"
-version = "0.1.1"
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/codegraph",
+    "crates/codegraph-parser-api",
+    "crates/codegraph-python",
+]
+
+[workspace.package]
 edition = "2021"
-authors = ["anvanster"]
 license = "Apache-2.0"
-description = "A fast, reliable, and flexible graph database optimized for storing and querying code relationships"
 repository = "https://github.com/anvanster/codegraph"
-readme = "README.md"
-keywords = ["graph", "code-analysis", "database", "ast", "relationships"]
-categories = ["database-implementations", "data-structures", "development-tools"]
+authors = ["anvanster"]
 
-[dependencies]
-# Storage backend
-rocksdb = "0.22"
-
-# Serialization
+[workspace.dependencies]
+# Shared dependencies across all crates
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# Error handling
 thiserror = "1.0"
-
-# Logging
+rocksdb = "0.22"
 log = "0.4"
-
-# Utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
-[dev-dependencies]
-# Testing utilities
-criterion = "0.5"
-tempfile = "3.0"
-
-[lib]
-name = "codegraph"
-path = "src/lib.rs"
-
-[[bench]]
-name = "graph_operations"
-harness = false
+# Internal crates
+codegraph = { path = "crates/codegraph", version = "0.1.1" }
+codegraph-parser-api = { path = "crates/codegraph-parser-api", version = "0.1.0" }
 
 [profile.release]
 opt-level = 3

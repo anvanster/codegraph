@@ -1,0 +1,159 @@
+use codegraph::{helpers, CodeGraph, NodeId};
+use std::collections::HashMap;
+
+use crate::error::Result;
+use crate::extractor::CodeIR;
+
+/// Build a graph from the intermediate representation.
+///
+/// Takes a `CodeIR` structure and adds all entities and relationships to the given graph.
+///
+/// # Arguments
+///
+/// * `graph` - Mutable reference to the code graph
+/// * `ir` - The intermediate representation containing entities and relationships
+/// * `file_path` - Path to the source file being processed
+///
+/// # Returns
+///
+/// The `NodeId` of the file node created, or an error if building fails.
+pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Result<NodeId> {
+    // Add the file/module node
+    let file_id = helpers::add_file(graph, file_path, "python")
+        .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+
+    // Track entity name -> NodeId mappings for relationship building
+    let mut entity_map: HashMap<String, NodeId> = HashMap::new();
+
+    // Add all functions
+    for func in &ir.functions {
+        let func_id = helpers::add_function(
+            graph,
+            file_id,
+            &func.name,
+            func.line_start as i64,
+            func.line_end as i64,
+        )
+        .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+
+        entity_map.insert(func.name.clone(), func_id);
+    }
+
+    // Add all classes
+    for class in &ir.classes {
+        let class_id = helpers::add_class(
+            graph,
+            file_id,
+            &class.name,
+            class.line_start as i64,
+            class.line_end as i64,
+        )
+        .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+
+        entity_map.insert(class.name.clone(), class_id);
+
+        // Add methods as functions linked to the class
+        for method in &class.methods {
+            let method_id = helpers::add_method(
+                graph,
+                class_id,
+                &method.name,
+                method.line_start as i64,
+                method.line_end as i64,
+            )
+            .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+
+            // Track methods with qualified name for call relationships
+            let qualified = format!("{}.{}", class.name, method.name);
+            entity_map.insert(qualified, method_id);
+        }
+    }
+
+    // Add call relationships
+    for call in &ir.calls {
+        if let (Some(&caller_id), Some(&callee_id)) =
+            (entity_map.get(&call.caller), entity_map.get(&call.callee))
+        {
+            helpers::add_call(graph, caller_id, callee_id, call.line as i64)
+                .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+        }
+    }
+
+    // TODO: Add import relationships
+    // Note: helpers::add_import requires both from_file_id and to_file_id (NodeIds)
+    // We would need to:
+    // 1. Track or create file nodes for imported modules
+    // 2. Convert module names to file paths
+    // 3. Create file nodes if they don't exist
+    // This is deferred to a future iteration
+    let _ = &ir.imports; // Suppress unused warning
+
+    Ok(file_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::{ClassEntity, FunctionEntity};
+    use crate::relationships::{CallRelation, ImportEntity};
+
+    #[test]
+    fn test_build_empty_module() {
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let ir = CodeIR::default();
+
+        let result = build_graph(&mut graph, &ir, "test.py");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_with_function() {
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let mut ir = CodeIR::default();
+
+        ir.add_function(FunctionEntity::new("test_func", 1, 3));
+
+        let result = build_graph(&mut graph, &ir, "test.py");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_with_class() {
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let mut ir = CodeIR::default();
+
+        ir.add_class(ClassEntity::new("MyClass", 1, 4));
+
+        let result = build_graph(&mut graph, &ir, "test.py");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_with_relationships() {
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let mut ir = CodeIR::default();
+
+        // Add two functions
+        ir.add_function(FunctionEntity::new("caller", 1, 3));
+        ir.add_function(FunctionEntity::new("callee", 5, 7));
+
+        // Add call relationship
+        ir.add_call(CallRelation {
+            caller: "caller".to_string(),
+            callee: "callee".to_string(),
+            line: 2,
+            is_method_call: false,
+        });
+
+        // Add import
+        ir.add_import(ImportEntity {
+            imported_items: vec!["os".to_string()],
+            from_module: "os".to_string(),
+            line: 1,
+            is_wildcard: false,
+        });
+
+        let result = build_graph(&mut graph, &ir, "test.py");
+        assert!(result.is_ok());
+    }
+}
