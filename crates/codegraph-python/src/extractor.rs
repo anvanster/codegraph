@@ -1,105 +1,12 @@
-use crate::config::ParserConfig;
-use crate::entities::{ClassEntity, FunctionEntity, ModuleEntity, TraitEntity};
-use crate::relationships::{
-    CallRelation, ImplementationRelation, ImportEntity, InheritanceRelation,
+// Use parser-API types instead of local duplicates
+use codegraph_parser_api::{
+    CallRelation, ClassEntity, CodeIR, FunctionEntity, ImportRelation,
+    InheritanceRelation, ModuleEntity,
 };
+use crate::config::ParserConfig;
 use rustpython_ast::Stmt;
 use rustpython_parser::{ast, Parse};
 use std::path::Path;
-
-/// Intermediate representation of extracted code
-///
-/// This struct holds all entities and relationships extracted from Python source
-/// before they are added to the graph database. This separation allows for:
-/// - Easier testing of extraction logic without graph database
-/// - Batch operations for better performance
-/// - Clean separation of concerns (extraction vs graph building)
-#[derive(Debug, Default)]
-pub struct CodeIR {
-    /// Module/file entity
-    pub module: Option<ModuleEntity>,
-
-    /// Functions extracted from the source
-    pub functions: Vec<FunctionEntity>,
-
-    /// Classes extracted from the source
-    pub classes: Vec<ClassEntity>,
-
-    /// Traits/Protocols extracted from the source
-    pub traits: Vec<TraitEntity>,
-
-    /// Function call relationships
-    pub calls: Vec<CallRelation>,
-
-    /// Import relationships
-    pub imports: Vec<ImportEntity>,
-
-    /// Inheritance relationships
-    pub inheritance: Vec<InheritanceRelation>,
-
-    /// Protocol/ABC implementation relationships
-    #[allow(dead_code)]
-    pub implementations: Vec<ImplementationRelation>,
-}
-
-impl CodeIR {
-    /// Create a new empty CodeIR
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add a function entity
-    pub fn add_function(&mut self, func: FunctionEntity) {
-        self.functions.push(func);
-    }
-
-    /// Add a class entity
-    pub fn add_class(&mut self, class: ClassEntity) {
-        self.classes.push(class);
-    }
-
-    /// Add a trait entity
-    #[allow(dead_code)]
-    pub fn add_trait(&mut self, trait_entity: TraitEntity) {
-        self.traits.push(trait_entity);
-    }
-
-    /// Add a call relationship
-    pub fn add_call(&mut self, call: CallRelation) {
-        self.calls.push(call);
-    }
-
-    /// Add an import relationship
-    pub fn add_import(&mut self, import: ImportEntity) {
-        self.imports.push(import);
-    }
-
-    /// Add an inheritance relationship
-    pub fn add_inheritance(&mut self, inheritance: InheritanceRelation) {
-        self.inheritance.push(inheritance);
-    }
-
-    /// Add an implementation relationship
-    #[allow(dead_code)]
-    pub fn add_implementation(&mut self, implementation: ImplementationRelation) {
-        self.implementations.push(implementation);
-    }
-
-    /// Get total number of entities
-    #[allow(dead_code)]
-    pub fn entity_count(&self) -> usize {
-        self.functions.len()
-            + self.classes.len()
-            + self.traits.len()
-            + if self.module.is_some() { 1 } else { 0 }
-    }
-
-    /// Get total number of relationships
-    #[allow(dead_code)]
-    pub fn relationship_count(&self) -> usize {
-        self.calls.len() + self.imports.len() + self.inheritance.len() + self.implementations.len()
-    }
-}
 
 /// Extract all entities and relationships from a Python AST
 ///
@@ -110,7 +17,7 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
     let ast = ast::Suite::parse(source, &file_path.display().to_string())
         .map_err(|e| format!("Parse error: {e:?}"))?;
 
-    let mut ir = CodeIR::new();
+    let mut ir = CodeIR::new(file_path.to_path_buf());
 
     // Extract module entity
     let module_name = file_path
@@ -121,8 +28,11 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
 
     // Count lines
     let line_count = source.lines().count();
-    let module = ModuleEntity::new(module_name, line_count);
-    ir.module = Some(module);
+    let module = ModuleEntity::new(module_name)
+        .with_path(file_path.display().to_string())
+        .with_language("python")
+        .with_line_count(line_count);
+    ir.set_module(module);
 
     // Walk through statements and extract entities
     for (idx, stmt) in ast.iter().enumerate() {
@@ -232,17 +142,32 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
             }
             Stmt::Import(import) => {
                 // Handle: import module1, module2, module3
-                let line = idx + 1;
+                let importer_name = file_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
                 for alias in &import.names {
                     let module_name = alias.name.to_string();
-                    let import_entity =
-                        ImportEntity::new(module_name.clone(), vec![module_name], line);
-                    ir.add_import(import_entity);
+                    let mut import_rel = ImportRelation::new(&importer_name, &module_name);
+
+                    // If there's an alias (import foo as bar)
+                    if let Some(ref asname) = alias.asname {
+                        import_rel = import_rel.with_alias(asname.as_str());
+                    }
+
+                    ir.add_import(import_rel);
                 }
             }
             Stmt::ImportFrom(import_from) => {
                 // Handle: from module import name1, name2, *
-                let line = idx + 1;
+                let importer_name = file_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
                 let from_module = import_from
                     .module
                     .as_ref()
@@ -256,16 +181,17 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                     .any(|alias| alias.name.as_str() == "*");
 
                 if is_wildcard {
-                    let import_entity = ImportEntity::wildcard(from_module, line);
-                    ir.add_import(import_entity);
+                    let import_rel = ImportRelation::new(&importer_name, &from_module).wildcard();
+                    ir.add_import(import_rel);
                 } else {
-                    let imported_items: Vec<String> = import_from
+                    let symbols: Vec<String> = import_from
                         .names
                         .iter()
                         .map(|alias| alias.name.to_string())
                         .collect();
-                    let import_entity = ImportEntity::new(from_module, imported_items, line);
-                    ir.add_import(import_entity);
+                    let import_rel = ImportRelation::new(&importer_name, &from_module)
+                        .with_symbols(symbols);
+                    ir.add_import(import_rel);
                 }
             }
             _ => {
@@ -375,12 +301,10 @@ fn extract_calls_from_expr(
 
             if let Some(callee) = callee_name {
                 let is_method = matches!(call_expr.func.as_ref(), Expr::Attribute(_));
-                calls.push(CallRelation {
-                    caller: caller_name.to_string(),
-                    callee,
-                    line,
-                    is_method_call: is_method,
-                });
+                let mut call = CallRelation::new(caller_name, &callee, line);
+                // Note: parser-API uses is_direct (default true), not is_method_call
+                // For now, we keep all calls as direct
+                calls.push(call);
             }
 
             // Also check arguments for nested calls

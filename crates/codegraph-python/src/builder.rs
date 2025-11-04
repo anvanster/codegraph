@@ -1,8 +1,8 @@
 use codegraph::{helpers, CodeGraph, NodeId};
+use codegraph_parser_api::CodeIR;
 use std::collections::HashMap;
 
 use crate::error::Result;
-use crate::extractor::CodeIR;
 
 /// Build a graph from the intermediate representation.
 ///
@@ -94,13 +94,12 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::{ClassEntity, FunctionEntity};
-    use crate::relationships::{CallRelation, ImportEntity};
+    use codegraph_parser_api::{CallRelation, ClassEntity, FunctionEntity, ImportRelation};
 
     #[test]
     fn test_build_empty_module() {
         let mut graph = CodeGraph::in_memory().unwrap();
-        let ir = CodeIR::default();
+        let ir = CodeIR::new(std::path::PathBuf::from("test.py"));
 
         let result = build_graph(&mut graph, &ir, "test.py");
         assert!(result.is_ok());
@@ -109,7 +108,7 @@ mod tests {
     #[test]
     fn test_build_with_function() {
         let mut graph = CodeGraph::in_memory().unwrap();
-        let mut ir = CodeIR::default();
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.py"));
 
         ir.add_function(FunctionEntity::new("test_func", 1, 3));
 
@@ -120,7 +119,7 @@ mod tests {
     #[test]
     fn test_build_with_class() {
         let mut graph = CodeGraph::in_memory().unwrap();
-        let mut ir = CodeIR::default();
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.py"));
 
         ir.add_class(ClassEntity::new("MyClass", 1, 4));
 
@@ -131,27 +130,17 @@ mod tests {
     #[test]
     fn test_build_with_relationships() {
         let mut graph = CodeGraph::in_memory().unwrap();
-        let mut ir = CodeIR::default();
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.py"));
 
         // Add two functions
         ir.add_function(FunctionEntity::new("caller", 1, 3));
         ir.add_function(FunctionEntity::new("callee", 5, 7));
 
-        // Add call relationship
-        ir.add_call(CallRelation {
-            caller: "caller".to_string(),
-            callee: "callee".to_string(),
-            line: 2,
-            is_method_call: false,
-        });
+        // Add call relationship using parser-API constructor
+        ir.add_call(CallRelation::new("caller", "callee", 2));
 
-        // Add import
-        ir.add_import(ImportEntity {
-            imported_items: vec!["os".to_string()],
-            from_module: "os".to_string(),
-            line: 1,
-            is_wildcard: false,
-        });
+        // Add import using parser-API constructor
+        ir.add_import(ImportRelation::new("test", "os"));
 
         let result = build_graph(&mut graph, &ir, "test.py");
         assert!(result.is_ok());

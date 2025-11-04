@@ -38,10 +38,9 @@
 //! let parser = Parser::new();
 //! ```
 
+// Keep old config and error for backward compatibility with deprecated API
 pub mod config;
-pub mod entities;
 pub mod error;
-pub mod relationships;
 
 mod builder;
 mod extractor;

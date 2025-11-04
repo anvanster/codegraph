@@ -49,10 +49,10 @@ impl PythonParser {
         metrics.total_relationships += relationships;
     }
 
-    /// Convert our internal CodeIR to graph nodes and return FileInfo
+    /// Convert CodeIR to graph nodes and return FileInfo
     fn ir_to_graph(
         &self,
-        ir: &crate::extractor::CodeIR,
+        ir: &codegraph_parser_api::CodeIR,
         graph: &mut CodeGraph,
         file_path: &Path,
     ) -> Result<FileInfo, ParserError> {
@@ -204,18 +204,18 @@ impl PythonParser {
 
         // Add import nodes and relationships
         for import in &ir.imports {
-            let import_name = import.module.clone();
+            let imported_module = &import.imported;
 
             // Create or get import node
-            let import_id = if let Some(&existing_id) = node_map.get(&import_name) {
+            let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
                 existing_id
             } else {
-                let mut node = Node::new(import_name.clone(), NodeType::Module);
+                let mut node = Node::new(imported_module.clone(), NodeType::Module);
                 node.add_property("is_external", "true");
 
                 let id = graph.add_node(node)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
-                node_map.insert(import_name, id);
+                node_map.insert(imported_module.clone(), id);
                 id
             };
 
@@ -225,6 +225,12 @@ impl PythonParser {
             let mut edge = Edge::new(file_id, import_id, EdgeType::Imports);
             if let Some(ref alias) = import.alias {
                 edge.add_property("alias", alias.clone());
+            }
+            if import.is_wildcard {
+                edge.add_property("is_wildcard", "true");
+            }
+            if !import.symbols.is_empty() {
+                edge.add_property("symbols", import.symbols.join(","));
             }
             graph.add_edge(edge)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
