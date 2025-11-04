@@ -6,6 +6,33 @@ Python parser plugin for CodeGraph - extracts code entities and relationships fr
 [![Documentation](https://docs.rs/codegraph-python/badge.svg)](https://docs.rs/codegraph-python)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
+## Version 0.2.0 Migration Notice
+
+**codegraph-python v0.2.0** introduces a unified parser API (`codegraph-parser-api`) for consistency across all language parsers.
+
+### New API (Recommended)
+```rust
+use codegraph_parser_api::CodeParser;
+use codegraph_python::PythonParser;
+use codegraph::CodeGraph;
+
+let mut graph = CodeGraph::in_memory()?;
+let parser = PythonParser::new();
+let info = parser.parse_file(Path::new("example.py"), &mut graph)?;
+```
+
+### Old API (Deprecated, will be removed in v0.3.0)
+```rust
+use codegraph_python::Parser;  // Deprecated
+
+let parser = Parser::new();
+let info = parser.parse_file(path, &mut graph)?;  // Still works with deprecation warning
+```
+
+**Migration Guide:** See [PARSER_TRAIT_MIGRATION.md](PARSER_TRAIT_MIGRATION.md) for details.
+
+---
+
 ## Features
 
 - 🚀 **Fast**: Parse 1000 Python files in under 10 seconds
