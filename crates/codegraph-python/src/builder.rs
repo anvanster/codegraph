@@ -74,7 +74,7 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
         if let (Some(&caller_id), Some(&callee_id)) =
             (entity_map.get(&call.caller), entity_map.get(&call.callee))
         {
-            helpers::add_call(graph, caller_id, callee_id, call.line as i64)
+            helpers::add_call(graph, caller_id, callee_id, call.call_site_line as i64)
                 .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
         }
     }

@@ -6,9 +6,9 @@
 
 use codegraph::{CodeGraph, NodeId};
 use codegraph_parser_api::{
-    CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics, ProjectInfo,
+    CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -56,7 +56,7 @@ impl PythonParser {
         graph: &mut CodeGraph,
         file_path: &Path,
     ) -> Result<FileInfo, ParserError> {
-        use codegraph::types::{Node, Edge, EdgeType, NodeType};
+        use codegraph::{EdgeType, NodeType, PropertyMap};
         use std::collections::HashMap;
 
         let mut node_map: HashMap<String, NodeId> = HashMap::new();
@@ -67,19 +67,17 @@ impl PythonParser {
 
         // Create module/file node
         let file_id = if let Some(ref module) = ir.module {
-            let mut node = Node::new(
-                module.name.clone(),
-                NodeType::File,
-            );
-            node.add_property("path", module.path.clone());
-            node.add_property("language", module.language.clone());
-            node.add_property("line_count", module.line_count().to_string());
+            let mut props = PropertyMap::new()
+                .with("name", module.name.clone())
+                .with("path", module.path.clone())
+                .with("language", module.language.clone())
+                .with("line_count", module.line_count.to_string());
 
-            if let Some(ref doc) = module.doc {
-                node.add_property("doc", doc.clone());
+            if let Some(ref doc) = module.doc_comment {
+                props = props.with("doc", doc.clone());
             }
 
-            let id = graph.add_node(node)
+            let id = graph.add_node(NodeType::CodeFile, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
             node_map.insert(module.name.clone(), id);
             id
@@ -89,11 +87,12 @@ impl PythonParser {
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let mut node = Node::new(file_name.clone(), NodeType::File);
-            node.add_property("path", file_path.display().to_string());
-            node.add_property("language", "python");
+            let props = PropertyMap::new()
+                .with("name", file_name.clone())
+                .with("path", file_path.display().to_string())
+                .with("language", "python");
 
-            let id = graph.add_node(node)
+            let id = graph.add_node(NodeType::CodeFile, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
             node_map.insert(file_name, id);
             id
@@ -101,104 +100,104 @@ impl PythonParser {
 
         // Add functions
         for func in &ir.functions {
-            let mut node = Node::new(func.name.clone(), NodeType::Function);
-            node.add_property("signature", func.signature.clone());
-            node.add_property("visibility", func.visibility.clone());
-            node.add_property("line_start", func.line_start.to_string());
-            node.add_property("line_end", func.line_end.to_string());
-            node.add_property("is_async", func.is_async.to_string());
-            node.add_property("is_static", func.is_static.to_string());
+            let mut props = PropertyMap::new()
+                .with("name", func.name.clone())
+                .with("signature", func.signature.clone())
+                .with("visibility", func.visibility.clone())
+                .with("line_start", func.line_start.to_string())
+                .with("line_end", func.line_end.to_string())
+                .with("is_async", func.is_async.to_string())
+                .with("is_static", func.is_static.to_string());
 
-            if let Some(ref doc) = func.doc {
-                node.add_property("doc", doc.clone());
+            if let Some(ref doc) = func.doc_comment {
+                props = props.with("doc", doc.clone());
             }
             if let Some(ref return_type) = func.return_type {
-                node.add_property("return_type", return_type.clone());
+                props = props.with("return_type", return_type.clone());
             }
 
-            let func_id = graph.add_node(node)
+            let func_id = graph.add_node(NodeType::Function, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(func.name.clone(), func_id);
             function_ids.push(func_id);
 
             // Link function to file
-            let edge = Edge::new(file_id, func_id, EdgeType::Contains);
-            graph.add_edge(edge)
+            graph.add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
 
         // Add classes
         for class in &ir.classes {
-            let mut node = Node::new(class.name.clone(), NodeType::Class);
-            node.add_property("visibility", class.visibility.clone());
-            node.add_property("line_start", class.line_start.to_string());
-            node.add_property("line_end", class.line_end.to_string());
-            node.add_property("is_abstract", class.is_abstract.to_string());
+            let mut props = PropertyMap::new()
+                .with("name", class.name.clone())
+                .with("visibility", class.visibility.clone())
+                .with("line_start", class.line_start.to_string())
+                .with("line_end", class.line_end.to_string())
+                .with("is_abstract", class.is_abstract.to_string());
 
-            if let Some(ref doc) = class.doc {
-                node.add_property("doc", doc.clone());
+            if let Some(ref doc) = class.doc_comment {
+                props = props.with("doc", doc.clone());
             }
 
-            let class_id = graph.add_node(node)
+            let class_id = graph.add_node(NodeType::Class, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(class.name.clone(), class_id);
             class_ids.push(class_id);
 
             // Link class to file
-            let edge = Edge::new(file_id, class_id, EdgeType::Contains);
-            graph.add_edge(edge)
+            graph.add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             // Add methods
             for method in &class.methods {
                 let method_name = format!("{}.{}", class.name, method.name);
-                let mut node = Node::new(method_name.clone(), NodeType::Function);
-                node.add_property("signature", method.signature.clone());
-                node.add_property("visibility", method.visibility.clone());
-                node.add_property("line_start", method.line_start.to_string());
-                node.add_property("line_end", method.line_end.to_string());
-                node.add_property("is_method", "true");
-                node.add_property("parent_class", class.name.clone());
+                let mut method_props = PropertyMap::new()
+                    .with("name", method_name.clone())
+                    .with("signature", method.signature.clone())
+                    .with("visibility", method.visibility.clone())
+                    .with("line_start", method.line_start.to_string())
+                    .with("line_end", method.line_end.to_string())
+                    .with("is_method", "true")
+                    .with("parent_class", class.name.clone());
 
-                if let Some(ref doc) = method.doc {
-                    node.add_property("doc", doc.clone());
+                if let Some(ref doc) = method.doc_comment {
+                    method_props = method_props.with("doc", doc.clone());
                 }
 
-                let method_id = graph.add_node(node)
+                let method_id = graph.add_node(NodeType::Function, method_props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
                 node_map.insert(method_name, method_id);
                 function_ids.push(method_id);
 
                 // Link method to class
-                let edge = Edge::new(class_id, method_id, EdgeType::Contains);
-                graph.add_edge(edge)
+                graph.add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
 
         // Add traits (protocols in Python)
         for trait_entity in &ir.traits {
-            let mut node = Node::new(trait_entity.name.clone(), NodeType::Trait);
-            node.add_property("visibility", trait_entity.visibility.clone());
-            node.add_property("line_start", trait_entity.line_start.to_string());
-            node.add_property("line_end", trait_entity.line_end.to_string());
+            let mut props = PropertyMap::new()
+                .with("name", trait_entity.name.clone())
+                .with("visibility", trait_entity.visibility.clone())
+                .with("line_start", trait_entity.line_start.to_string())
+                .with("line_end", trait_entity.line_end.to_string());
 
-            if let Some(ref doc) = trait_entity.doc {
-                node.add_property("doc", doc.clone());
+            if let Some(ref doc) = trait_entity.doc_comment {
+                props = props.with("doc", doc.clone());
             }
 
-            let trait_id = graph.add_node(node)
+            let trait_id = graph.add_node(NodeType::Interface, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(trait_entity.name.clone(), trait_id);
             trait_ids.push(trait_id);
 
             // Link trait to file
-            let edge = Edge::new(file_id, trait_id, EdgeType::Contains);
-            graph.add_edge(edge)
+            graph.add_edge(file_id, trait_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
 
@@ -210,10 +209,11 @@ impl PythonParser {
             let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
                 existing_id
             } else {
-                let mut node = Node::new(imported_module.clone(), NodeType::Module);
-                node.add_property("is_external", "true");
+                let props = PropertyMap::new()
+                    .with("name", imported_module.clone())
+                    .with("is_external", "true");
 
-                let id = graph.add_node(node)
+                let id = graph.add_node(NodeType::Module, props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
                 node_map.insert(imported_module.clone(), id);
                 id
@@ -222,17 +222,17 @@ impl PythonParser {
             import_ids.push(import_id);
 
             // Create import edge from file to imported module
-            let mut edge = Edge::new(file_id, import_id, EdgeType::Imports);
+            let mut edge_props = PropertyMap::new();
             if let Some(ref alias) = import.alias {
-                edge.add_property("alias", alias.clone());
+                edge_props = edge_props.with("alias", alias.clone());
             }
             if import.is_wildcard {
-                edge.add_property("is_wildcard", "true");
+                edge_props = edge_props.with("is_wildcard", "true");
             }
             if !import.symbols.is_empty() {
-                edge.add_property("symbols", import.symbols.join(","));
+                edge_props = edge_props.with("symbols", import.symbols.join(","));
             }
-            graph.add_edge(edge)
+            graph.add_edge(file_id, import_id, EdgeType::Imports, edge_props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
 
@@ -240,11 +240,11 @@ impl PythonParser {
         for call in &ir.calls {
             if let (Some(&caller_id), Some(&callee_id)) =
                 (node_map.get(&call.caller), node_map.get(&call.callee)) {
-                let mut edge = Edge::new(caller_id, callee_id, EdgeType::Calls);
-                edge.add_property("call_site_line", call.call_site_line.to_string());
-                edge.add_property("is_direct", call.is_direct.to_string());
+                let edge_props = PropertyMap::new()
+                    .with("call_site_line", call.call_site_line.to_string())
+                    .with("is_direct", call.is_direct.to_string());
 
-                graph.add_edge(edge)
+                graph.add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
@@ -253,17 +253,17 @@ impl PythonParser {
         for inheritance in &ir.inheritance {
             if let (Some(&child_id), Some(&parent_id)) =
                 (node_map.get(&inheritance.child), node_map.get(&inheritance.parent)) {
-                let mut edge = Edge::new(child_id, parent_id, EdgeType::Inherits);
-                edge.add_property("order", inheritance.order.to_string());
+                let edge_props = PropertyMap::new()
+                    .with("order", inheritance.order.to_string());
 
-                graph.add_edge(edge)
+                graph.add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
 
         // Count source lines
         let line_count = if let Some(ref module) = ir.module {
-            module.line_count()
+            module.line_count
         } else {
             0
         };

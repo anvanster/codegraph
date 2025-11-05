@@ -1,7 +1,7 @@
 //! AST visitor for extracting Go entities
 
 use codegraph_parser_api::{
-    ClassEntity, FunctionEntity, ImportRelation, Parameter, ParserConfig, TraitEntity,
+    ClassEntity, FunctionEntity, ImportRelation, ParserConfig, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -127,6 +127,7 @@ impl<'a> GoVisitor<'a> {
                                 required_methods: Vec::new(),
                                 parent_traits: Vec::new(),
                                 doc_comment: None,
+                                attributes: Vec::new(),
                             };
                             self.interfaces.push(interface_entity);
                         }
@@ -147,5 +148,115 @@ impl<'a> GoVisitor<'a> {
             alias: None,
         };
         self.imports.push(import);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_visitor_basics() {
+        let visitor = GoVisitor::new(b"package main", ParserConfig::default());
+        assert_eq!(visitor.functions.len(), 0);
+        assert_eq!(visitor.structs.len(), 0);
+        assert_eq!(visitor.interfaces.len(), 0);
+    }
+
+    #[test]
+    fn test_visitor_function_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc greet(name string) string { return \"Hello\" }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "greet");
+    }
+
+    #[test]
+    fn test_visitor_struct_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\ntype Person struct { Name string }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.structs.len(), 1);
+        assert_eq!(visitor.structs[0].name, "Person");
+    }
+
+    #[test]
+    fn test_visitor_interface_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\ntype Reader interface { Read() error }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.interfaces.len(), 1);
+        assert_eq!(visitor.interfaces[0].name, "Reader");
+    }
+
+    #[test]
+    fn test_visitor_method_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc (p Person) String() string { return \"\" }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        // Methods are extracted as functions
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "String");
+    }
+
+    #[test]
+    fn test_visitor_import_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nimport \"fmt\"";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_visitor_multiple_declarations() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\ntype User struct {}\ntype Admin struct {}";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.structs.len(), 2);
+        assert_eq!(visitor.structs[0].name, "User");
+        assert_eq!(visitor.structs[1].name, "Admin");
     }
 }

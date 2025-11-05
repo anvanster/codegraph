@@ -345,6 +345,7 @@ impl<'ast> Visit<'ast> for RustVisitor {
             required_methods,
             parent_traits,
             doc_comment: doc,
+            attributes: Vec::new(),
         };
 
         self.traits.push(trait_entity);
@@ -498,5 +499,183 @@ pub trait MyTrait {
         assert_eq!(visitor.traits.len(), 1);
         assert_eq!(visitor.traits[0].name, "MyTrait");
         assert_eq!(visitor.traits[0].required_methods.len(), 1);
+    }
+
+    #[test]
+    fn test_visitor_enum() {
+        let source = r#"
+pub enum Status {
+    Active,
+    Inactive,
+    Pending,
+}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.classes.len(), 1);
+        assert_eq!(visitor.classes[0].name, "Status");
+    }
+
+    #[test]
+    fn test_visitor_impl_block() {
+        let source = r#"
+struct MyStruct;
+
+impl MyStruct {
+    fn new() -> Self {
+        MyStruct
+    }
+
+    fn method(&self) {}
+}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.classes.len(), 1);
+        // Methods should be extracted
+        let struct_with_methods = &visitor.classes[0];
+        assert!(struct_with_methods.methods.len() > 0 || visitor.functions.len() > 0);
+    }
+
+    #[test]
+    fn test_visitor_async_function() {
+        let source = r#"
+async fn fetch() -> String {
+    "data".to_string()
+}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert!(visitor.functions[0].is_async);
+    }
+
+    #[test]
+    fn test_visitor_use_statements() {
+        let source = r#"
+use std::collections::HashMap;
+use std::io::{self, Read};
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert!(visitor.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_visitor_generic_struct() {
+        let source = r#"
+pub struct Wrapper<T> {
+    value: T,
+}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.classes.len(), 1);
+        assert_eq!(visitor.classes[0].name, "Wrapper");
+        assert!(visitor.classes[0].type_parameters.len() > 0);
+    }
+
+    #[test]
+    fn test_visitor_trait_impl() {
+        let source = r#"
+pub trait Display {
+    fn display(&self);
+}
+
+pub struct Item;
+
+impl Display for Item {
+    fn display(&self) {}
+}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.traits.len(), 1);
+        assert_eq!(visitor.classes.len(), 1);
+        assert!(visitor.implementations.len() > 0 || visitor.classes[0].implemented_traits.len() > 0);
+    }
+
+    #[test]
+    fn test_visitor_function_with_attributes() {
+        let source = r#"
+#[test]
+#[ignore]
+fn test_something() {}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert!(visitor.functions[0].is_test);
+        // Note: Full attribute extraction not yet implemented
+        // Attributes are detected for is_test flag but not stored in attributes vector
+    }
+
+    #[test]
+    fn test_visitor_visibility_modifiers() {
+        let source = r#"
+pub fn public_fn() {}
+fn private_fn() {}
+pub(crate) fn crate_fn() {}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.functions.len(), 3);
+        // Check that visibility is captured
+        let public_count = visitor.functions.iter()
+            .filter(|f| f.visibility.contains("public"))
+            .count();
+        assert!(public_count >= 1);
+    }
+
+    #[test]
+    fn test_visitor_multiple_items() {
+        let source = r#"
+use std::fmt;
+
+pub trait Trait1 {
+    fn method1(&self);
+}
+
+pub struct Struct1 {
+    field: i32,
+}
+
+pub enum Enum1 {
+    Variant1,
+    Variant2,
+}
+
+pub fn function1() {}
+
+impl Struct1 {
+    fn new() -> Self {
+        Struct1 { field: 0 }
+    }
+}
+"#;
+        let syntax_tree = syn::parse_file(source).unwrap();
+        let mut visitor = RustVisitor::new(ParserConfig::default());
+        visitor.visit_file(&syntax_tree);
+
+        assert_eq!(visitor.traits.len(), 1);
+        assert!(visitor.classes.len() >= 2); // Struct1 and Enum1
+        assert!(visitor.functions.len() >= 1);
+        assert!(visitor.imports.len() >= 1);
     }
 }

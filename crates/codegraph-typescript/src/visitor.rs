@@ -1,10 +1,10 @@
 //! AST visitor for extracting TypeScript/JavaScript entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, Field, FunctionEntity, ImplementationRelation, ImportRelation,
+    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
     InheritanceRelation, Parameter, ParserConfig, TraitEntity,
 };
-use tree_sitter::{Node, TreeCursor};
+use tree_sitter::Node;
 
 /// Visitor that extracts entities and relationships from TypeScript/JavaScript AST
 pub struct TypeScriptVisitor<'a> {
@@ -46,9 +46,10 @@ impl<'a> TypeScriptVisitor<'a> {
     /// Visit a tree-sitter node
     pub fn visit_node(&mut self, node: Node) {
         match node.kind() {
-            "function_declaration" | "function" => self.visit_function(node),
+            // Only match declaration nodes to avoid duplicates
+            "function_declaration" => self.visit_function(node),
             "arrow_function" => self.visit_arrow_function(node),
-            "class_declaration" | "class" => self.visit_class(node),
+            "class_declaration" => self.visit_class(node),
             "interface_declaration" => self.visit_interface(node),
             "import_statement" => self.visit_import(node),
             _ => {}
@@ -176,6 +177,7 @@ impl<'a> TypeScriptVisitor<'a> {
             required_methods: Vec::new(),
             parent_traits: Vec::new(),
             doc_comment: None,
+            attributes: Vec::new(),
         };
 
         self.interfaces.push(interface);
@@ -232,5 +234,105 @@ mod tests {
         let visitor = TypeScriptVisitor::new(b"test", ParserConfig::default());
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
+    }
+
+    #[test]
+    fn test_visitor_function_parameters() {
+        use tree_sitter::Parser;
+
+        let source = b"function greet(name: string, age: number): void {}";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "greet");
+        assert_eq!(visitor.functions[0].parameters.len(), 2);
+        assert_eq!(visitor.functions[0].parameters[0].name, "name");
+        assert_eq!(visitor.functions[0].parameters[1].name, "age");
+    }
+
+    #[test]
+    fn test_visitor_async_function_detection() {
+        use tree_sitter::Parser;
+
+        let source = b"async function loadData() { await fetch(); }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert!(visitor.functions[0].is_async);
+    }
+
+    #[test]
+    fn test_visitor_class_context() {
+        use tree_sitter::Parser;
+
+        let source = b"class MyClass { myMethod() {} }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.classes.len(), 1);
+        assert_eq!(visitor.classes[0].name, "MyClass");
+        // Note: Method extraction not yet implemented
+        // Visitor would need to match "method_definition" node type
+    }
+
+    #[test]
+    fn test_visitor_interface_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"interface IPerson { name: string; age: number; }";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.interfaces.len(), 1);
+        assert_eq!(visitor.interfaces[0].name, "IPerson");
+    }
+
+    #[test]
+    fn test_visitor_import_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"import { useState } from 'react';";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_visitor_arrow_function_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"const func = () => { return 42; };";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        // Arrow functions should be extracted
+        assert!(visitor.functions.len() > 0);
     }
 }

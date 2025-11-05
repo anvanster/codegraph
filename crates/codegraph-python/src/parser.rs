@@ -204,7 +204,7 @@ impl Parser {
 
         if let Some(ref module) = ir.module {
             file_info.modules.push(module.name.clone());
-            file_info.lines = module.line_count();
+            file_info.lines = module.line_count;
         }
 
         file_info.parse_time = start.elapsed();

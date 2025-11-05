@@ -28,9 +28,7 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
 
     // Count lines
     let line_count = source.lines().count();
-    let module = ModuleEntity::new(module_name)
-        .with_path(file_path.display().to_string())
-        .with_language("python")
+    let module = ModuleEntity::new(module_name, file_path.display().to_string(), "python")
         .with_line_count(line_count);
     ir.set_module(module);
 
@@ -55,7 +53,7 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                 let line_start = idx + 1;
                 let line_end = line_start + func_def.body.len();
                 let func = FunctionEntity::new(func_def.name.as_str(), line_start, line_end)
-                    .set_async(true);
+                    .async_fn();
                 ir.add_function(func);
 
                 // Extract calls from async function body
@@ -103,7 +101,7 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                                 method_line_start,
                                 method_line_end,
                             )
-                            .set_async(true);
+                            .async_fn();
                             methods.push(method);
 
                             // Extract calls from async method body
@@ -134,7 +132,6 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                         let inheritance = InheritanceRelation::new(
                             class_def.name.as_str(),
                             parent_name,
-                            line_start,
                         );
                         ir.add_inheritance(inheritance);
                     }
@@ -300,8 +297,8 @@ fn extract_calls_from_expr(
             let callee_name = extract_callee_name(call_expr.func.as_ref());
 
             if let Some(callee) = callee_name {
-                let is_method = matches!(call_expr.func.as_ref(), Expr::Attribute(_));
-                let mut call = CallRelation::new(caller_name, &callee, line);
+                let _is_method = matches!(call_expr.func.as_ref(), Expr::Attribute(_));
+                let call = CallRelation::new(caller_name, &callee, line);
                 // Note: parser-API uses is_direct (default true), not is_method_call
                 // For now, we keep all calls as direct
                 calls.push(call);
@@ -392,14 +389,16 @@ mod tests {
 
     #[test]
     fn test_code_ir_new() {
-        let ir = CodeIR::new();
+        let path = Path::new("test.py");
+        let ir = CodeIR::new(path.to_path_buf());
         assert_eq!(ir.entity_count(), 0);
         assert_eq!(ir.relationship_count(), 0);
     }
 
     #[test]
     fn test_code_ir_counts() {
-        let mut ir = CodeIR::new();
+        let path = Path::new("test.py");
+        let mut ir = CodeIR::new(path.to_path_buf());
 
         ir.add_function(FunctionEntity::new("test_func", 1, 5));
         assert_eq!(ir.entity_count(), 1);
@@ -477,12 +476,6 @@ class Calculator:
             method_calls.len(),
             1,
             "Should find call from Calculator.multiply to self.add"
-        );
-
-        // Verify it's marked as a method call
-        assert!(
-            method_calls[0].is_method_call,
-            "Should be marked as method call"
         );
     }
 
@@ -562,31 +555,31 @@ def main():
         assert_eq!(ir.imports.len(), 5, "Should find 5 import statements");
 
         // Check regular imports
-        let os_import = ir.imports.iter().find(|i| i.from_module == "os");
+        let os_import = ir.imports.iter().find(|i| i.imported == "os");
         assert!(os_import.is_some(), "Should find os import");
 
-        let sys_import = ir.imports.iter().find(|i| i.from_module == "sys");
+        let sys_import = ir.imports.iter().find(|i| i.imported == "sys");
         assert!(sys_import.is_some(), "Should find sys import");
 
         // Check from imports
-        let pathlib_import = ir.imports.iter().find(|i| i.from_module == "pathlib");
+        let pathlib_import = ir.imports.iter().find(|i| i.imported == "pathlib");
         assert!(pathlib_import.is_some(), "Should find pathlib import");
         assert_eq!(
-            pathlib_import.unwrap().imported_items,
+            pathlib_import.unwrap().symbols,
             vec!["Path"],
             "Should import Path from pathlib"
         );
 
-        let typing_import = ir.imports.iter().find(|i| i.from_module == "typing");
+        let typing_import = ir.imports.iter().find(|i| i.imported == "typing");
         assert!(typing_import.is_some(), "Should find typing import");
         assert_eq!(
-            typing_import.unwrap().imported_items.len(),
+            typing_import.unwrap().symbols.len(),
             2,
             "Should import 2 items from typing"
         );
 
         // Check wildcard import
-        let wildcard_import = ir.imports.iter().find(|i| i.from_module == "collections");
+        let wildcard_import = ir.imports.iter().find(|i| i.imported == "collections");
         assert!(
             wildcard_import.is_some(),
             "Should find collections wildcard import"

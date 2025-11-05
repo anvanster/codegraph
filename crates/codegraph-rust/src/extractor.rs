@@ -147,4 +147,205 @@ pub trait MyTrait {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ParserError::SyntaxError(_, _, _, _)));
     }
+
+    #[test]
+    fn test_extract_enum() {
+        let source = r#"
+pub enum Color {
+    Red,
+    Green,
+    Blue,
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "Color");
+    }
+
+    #[test]
+    fn test_extract_impl_block() {
+        let source = r#"
+struct Calculator;
+
+impl Calculator {
+    fn add(&self, a: i32, b: i32) -> i32 {
+        a + b
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        // Method should be extracted
+        assert!(ir.functions.len() > 0 || ir.classes[0].methods.len() > 0);
+    }
+
+    #[test]
+    fn test_extract_async_function() {
+        let source = r#"
+async fn fetch_data() -> String {
+    "data".to_string()
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.functions[0].name, "fetch_data");
+        assert!(ir.functions[0].is_async);
+    }
+
+    #[test]
+    fn test_extract_use_statement() {
+        let source = r#"
+use std::collections::HashMap;
+use std::fs;
+
+fn test() {}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.imports.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_multiple_entities() {
+        let source = r#"
+use std::fmt;
+
+pub trait Display {
+    fn display(&self) -> String;
+}
+
+pub struct Person {
+    name: String,
+    age: u32,
+}
+
+impl Display for Person {
+    fn display(&self) -> String {
+        format!("{}: {}", self.name, self.age)
+    }
+}
+
+pub fn greet(p: &Person) {
+    println!("{}", p.display());
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.traits.len(), 1);
+        assert_eq!(ir.traits[0].name, "Display");
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "Person");
+        assert!(ir.functions.len() >= 1); // greet function
+        assert!(ir.imports.len() >= 1); // use std::fmt
+    }
+
+    #[test]
+    fn test_extract_generic_struct() {
+        let source = r#"
+pub struct Container<T> {
+    value: T,
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "Container");
+    }
+
+    #[test]
+    fn test_extract_module_info() {
+        let source = r#"
+fn test() {
+    println!("test");
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("module.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(ir.module.is_some());
+        let module = ir.module.unwrap();
+        assert_eq!(module.name, "module");
+        assert_eq!(module.language, "rust");
+        assert!(module.line_count > 0);
+    }
+
+    #[test]
+    fn test_extract_visibility_modifiers() {
+        let source = r#"
+pub fn public_fn() {}
+fn private_fn() {}
+pub(crate) fn crate_fn() {}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_trait_implementation() {
+        let source = r#"
+pub trait Speak {
+    fn speak(&self);
+}
+
+pub struct Dog;
+
+impl Speak for Dog {
+    fn speak(&self) {
+        println!("Woof!");
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.traits.len(), 1);
+        assert_eq!(ir.classes.len(), 1);
+        assert!(ir.implementations.len() > 0 || ir.classes[0].implemented_traits.len() > 0);
+    }
+
+    #[test]
+    fn test_extract_test_function() {
+        let source = r#"
+#[test]
+fn test_something() {
+    assert_eq!(2 + 2, 4);
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 1);
+        assert!(ir.functions[0].is_test);
+    }
 }

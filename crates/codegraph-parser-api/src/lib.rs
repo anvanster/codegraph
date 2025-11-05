@@ -75,3 +75,6 @@ pub use relationships::{
     CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation,
 };
 pub use traits::{CodeParser, FileInfo, ProjectInfo};
+
+#[cfg(test)]
+mod tests;

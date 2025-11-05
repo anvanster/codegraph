@@ -1,11 +1,11 @@
 //! Implementation of the CodeParser trait for Go
 
-use codegraph::{CodeGraph, NodeId};
+use codegraph::CodeGraph;
 use codegraph_parser_api::{
-    CodeIR, CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics, ProjectInfo,
+    CodeIR, CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics,
 };
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
