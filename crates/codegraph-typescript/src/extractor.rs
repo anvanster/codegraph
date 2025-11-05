@@ -33,11 +33,9 @@ pub fn extract(
         .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
 
     // Parse the source code
-    let tree = parser
-        .parse(source, None)
-        .ok_or_else(|| {
-            ParserError::ParseError(file_path.to_path_buf(), "Failed to parse".to_string())
-        })?;
+    let tree = parser.parse(source, None).ok_or_else(|| {
+        ParserError::ParseError(file_path.to_path_buf(), "Failed to parse".to_string())
+    })?;
 
     // Check for syntax errors
     let root_node = tree.root_node();
@@ -345,7 +343,7 @@ class Counter extends Component {
         let ir = result.unwrap();
         assert_eq!(ir.classes.len(), 1);
         assert_eq!(ir.classes[0].name, "Counter");
-        assert!(ir.functions.len() >= 1); // render method
+        assert!(!ir.functions.is_empty()); // render method
         assert_eq!(ir.imports.len(), 1);
     }
 

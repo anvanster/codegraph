@@ -1,7 +1,7 @@
 //! Integration tests for codegraph-typescript parser
 
 use codegraph::CodeGraph;
-use codegraph_parser_api::{CodeParser, ParserError};
+use codegraph_parser_api::CodeParser;
 use codegraph_typescript::TypeScriptParser;
 use std::path::Path;
 
@@ -272,7 +272,7 @@ function createGreeter(name: string): Greeter {
     // Note: Import and method extraction not yet fully implemented
     assert_eq!(info.traits.len(), 1);
     assert_eq!(info.classes.len(), 1);
-    assert!(info.functions.len() >= 1); // createGreeter function
+    assert!(!info.functions.is_empty()); // createGreeter function
 }
 
 #[test]
@@ -393,7 +393,7 @@ class Dog extends Animal {
 
     let info = result.unwrap();
     // Note: Both abstract and concrete classes should be extracted
-    assert!(info.classes.len() >= 1);
+    assert!(!info.classes.is_empty());
 }
 
 #[test]
@@ -464,12 +464,11 @@ export type { User };
     // Note: Import and method extraction not yet fully implemented
     assert_eq!(info.traits.len(), 1); // User interface
     assert_eq!(info.classes.len(), 1); // UserService class
-    assert!(info.functions.len() >= 1); // createUserService function
+    assert!(!info.functions.is_empty()); // createUserService function
 }
 
 #[test]
 fn test_parser_metrics() {
-    use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -480,7 +479,7 @@ function func2() {}
 
     // Create a temporary file for testing
     let mut temp_file = NamedTempFile::new().unwrap();
-    write!(temp_file, "{}", source).unwrap();
+    write!(temp_file, "{source}").unwrap();
     temp_file.flush().unwrap();
 
     let mut graph = CodeGraph::in_memory().unwrap();
@@ -545,6 +544,6 @@ class Service {
 
     let info = result.unwrap();
     assert_eq!(info.classes.len(), 1);
-    assert!(info.functions.len() >= 1); // log function
-    // Note: Method extraction not yet implemented in TypeScript visitor
+    assert!(!info.functions.is_empty()); // log function
+                                         // Note: Method extraction not yet implemented in TypeScript visitor
 }

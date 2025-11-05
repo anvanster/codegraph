@@ -261,7 +261,7 @@ mod tests {
 
     let info = result.unwrap();
     // Should have Person struct, impl blocks with methods, test module
-    assert!(info.classes.len() >= 1);
+    assert!(!info.classes.is_empty());
     assert!(info.functions.len() >= 2);
 }
 
@@ -288,7 +288,7 @@ fn func2() {}
 
     // Create a temporary file for testing
     let mut temp_file = NamedTempFile::new().unwrap();
-    write!(temp_file, "{}", source).unwrap();
+    write!(temp_file, "{source}").unwrap();
     temp_file.flush().unwrap();
 
     let mut graph = CodeGraph::in_memory().unwrap();

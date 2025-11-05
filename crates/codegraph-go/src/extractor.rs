@@ -7,10 +7,16 @@ use tree_sitter::Parser;
 use crate::visitor::GoVisitor;
 
 /// Extract code entities and relationships from Go source code
-pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<CodeIR, ParserError> {
+pub fn extract(
+    source: &str,
+    file_path: &Path,
+    config: &ParserConfig,
+) -> Result<CodeIR, ParserError> {
     let mut parser = Parser::new();
     let language = tree_sitter_go::language();
-    parser.set_language(language).map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
+    parser
+        .set_language(language)
+        .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
 
     let tree = parser.parse(source, None).ok_or_else(|| {
         ParserError::ParseError(file_path.to_path_buf(), "Failed to parse".to_string())
@@ -18,12 +24,21 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
 
     let root_node = tree.root_node();
     if root_node.has_error() {
-        return Err(ParserError::SyntaxError(file_path.to_path_buf(), 0, 0, "Syntax error".to_string()));
+        return Err(ParserError::SyntaxError(
+            file_path.to_path_buf(),
+            0,
+            0,
+            "Syntax error".to_string(),
+        ));
     }
 
     let mut ir = CodeIR::new(file_path.to_path_buf());
 
-    let module_name = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+    let module_name = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
     ir.module = Some(ModuleEntity {
         name: module_name,
         path: file_path.display().to_string(),
@@ -253,7 +268,7 @@ type (
 
         assert!(result.is_ok());
         let ir = result.unwrap();
-        assert!(ir.classes.len() >= 1); // Should extract at least User
+        assert!(!ir.classes.is_empty()); // Should extract at least User
     }
 
     #[test]

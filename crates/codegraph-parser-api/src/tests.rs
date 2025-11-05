@@ -148,8 +148,7 @@ fn test_import_relation_builder() {
 
 #[test]
 fn test_inheritance_relation_builder() {
-    let inheritance = InheritanceRelation::new("Dog", "Animal")
-        .with_order(0);
+    let inheritance = InheritanceRelation::new("Dog", "Animal").with_order(0);
 
     assert_eq!(inheritance.child, "Dog");
     assert_eq!(inheritance.parent, "Animal");

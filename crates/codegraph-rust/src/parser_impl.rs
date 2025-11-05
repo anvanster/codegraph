@@ -3,12 +3,12 @@
 //! This module provides the RustParser struct that implements the
 //! codegraph-parser-api::CodeParser trait for parsing Rust source files.
 
-use codegraph::{CodeGraph, NodeId};
+use codegraph::CodeGraph;
 use codegraph_parser_api::{
-    CodeIR, CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics, ProjectInfo,
+    CodeIR, CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics,
 };
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -84,16 +84,12 @@ impl CodeParser for RustParser {
         &[".rs"]
     }
 
-    fn parse_file(
-        &self,
-        path: &Path,
-        graph: &mut CodeGraph,
-    ) -> Result<FileInfo, ParserError> {
+    fn parse_file(&self, path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
 
         // Check file size
-        let metadata = fs::metadata(path)
-            .map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let metadata =
+            fs::metadata(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
 
         if metadata.len() as usize > self.config.max_file_size {
             return Err(ParserError::FileTooLarge(
@@ -103,8 +99,8 @@ impl CodeParser for RustParser {
         }
 
         // Read file
-        let source = fs::read_to_string(path)
-            .map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let source =
+            fs::read_to_string(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
 
         // Parse source
         let result = self.parse_source(&source, path, graph);

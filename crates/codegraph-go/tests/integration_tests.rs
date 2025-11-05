@@ -1,8 +1,8 @@
 //! Integration tests for codegraph-go parser
 
 use codegraph::CodeGraph;
-use codegraph_parser_api::{CodeParser, ParserError};
 use codegraph_go::GoParser;
+use codegraph_parser_api::CodeParser;
 use std::path::Path;
 
 #[test]
@@ -409,13 +409,12 @@ func main() {
     let info = result.unwrap();
     assert_eq!(info.classes.len(), 1); // Person struct
     assert_eq!(info.functions.len(), 3); // NewPerson, Greet, main
-    // Should extract 2 individual imports: fmt, errors
+                                         // Should extract 2 individual imports: fmt, errors
     assert_eq!(info.imports.len(), 2);
 }
 
 #[test]
 fn test_parser_metrics() {
-    use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -428,7 +427,7 @@ func func2() {}
 
     // Create a temporary file for testing
     let mut temp_file = NamedTempFile::new().unwrap();
-    write!(temp_file, "{}", source).unwrap();
+    write!(temp_file, "{source}").unwrap();
     temp_file.flush().unwrap();
 
     let mut graph = CodeGraph::in_memory().unwrap();

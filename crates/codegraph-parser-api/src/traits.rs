@@ -1,8 +1,4 @@
-use crate::{
-    config::ParserConfig,
-    errors::ParserError,
-    metrics::ParserMetrics,
-};
+use crate::{config::ParserConfig, errors::ParserError, metrics::ParserMetrics};
 use codegraph::{CodeGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -167,11 +163,7 @@ pub trait CodeParser: Send + Sync {
     /// - File cannot be read
     /// - Source code has syntax errors
     /// - Graph insertion fails
-    fn parse_file(
-        &self,
-        path: &Path,
-        graph: &mut CodeGraph,
-    ) -> Result<FileInfo, ParserError>;
+    fn parse_file(&self, path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError>;
 
     /// Parse source code string and insert into graph
     ///
@@ -271,11 +263,10 @@ pub trait CodeParser: Send + Sync {
                 return Ok(());
             }
 
-            for entry in fs::read_dir(dir)
-                .map_err(|e| ParserError::IoError(dir.to_path_buf(), e))?
+            for entry in
+                fs::read_dir(dir).map_err(|e| ParserError::IoError(dir.to_path_buf(), e))?
             {
-                let entry = entry
-                    .map_err(|e| ParserError::IoError(dir.to_path_buf(), e))?;
+                let entry = entry.map_err(|e| ParserError::IoError(dir.to_path_buf(), e))?;
                 let path = entry.path();
 
                 if path.is_dir() {

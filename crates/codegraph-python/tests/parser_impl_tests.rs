@@ -29,8 +29,8 @@ fn test_parser_custom_config() {
     };
     let parser = PythonParser::with_config(config.clone());
 
-    assert_eq!(parser.config().skip_private, true);
-    assert_eq!(parser.config().skip_tests, true);
+    assert!(parser.config().skip_private);
+    assert!(parser.config().skip_tests);
     assert_eq!(parser.config().max_file_size, 5000);
 }
 
@@ -56,7 +56,9 @@ fn test_metrics_after_successful_parse() {
     let mut graph = CodeGraph::in_memory().unwrap();
 
     let source = "def foo(): pass";
-    parser.parse_source(source, Path::new("test.py"), &mut graph).unwrap();
+    parser
+        .parse_source(source, Path::new("test.py"), &mut graph)
+        .unwrap();
 
     let metrics = parser.metrics();
     assert_eq!(metrics.files_attempted, 1);
@@ -84,9 +86,15 @@ fn test_metrics_accumulation() {
     let mut graph = CodeGraph::in_memory().unwrap();
 
     // Parse multiple files
-    parser.parse_source("def foo(): pass", Path::new("test1.py"), &mut graph).unwrap();
-    parser.parse_source("def bar(): pass", Path::new("test2.py"), &mut graph).unwrap();
-    parser.parse_source("class Baz: pass", Path::new("test3.py"), &mut graph).unwrap();
+    parser
+        .parse_source("def foo(): pass", Path::new("test1.py"), &mut graph)
+        .unwrap();
+    parser
+        .parse_source("def bar(): pass", Path::new("test2.py"), &mut graph)
+        .unwrap();
+    parser
+        .parse_source("class Baz: pass", Path::new("test3.py"), &mut graph)
+        .unwrap();
 
     let metrics = parser.metrics();
     assert_eq!(metrics.files_attempted, 3);
@@ -99,7 +107,9 @@ fn test_metrics_reset() {
     let mut parser = PythonParser::new();
     let mut graph = CodeGraph::in_memory().unwrap();
 
-    parser.parse_source("def foo(): pass", Path::new("test.py"), &mut graph).unwrap();
+    parser
+        .parse_source("def foo(): pass", Path::new("test.py"), &mut graph)
+        .unwrap();
 
     let metrics_before = parser.metrics();
     assert!(metrics_before.files_succeeded > 0);
@@ -285,7 +295,7 @@ class MyClass:
     assert!(result.is_ok());
 
     let file_info = result.unwrap();
-    assert!(file_info.functions.len() >= 1);
+    assert!(!file_info.functions.is_empty());
 }
 
 // ====================
@@ -610,5 +620,5 @@ class Outer:
 
     // The parser should handle nested structures
     let file_info = result.unwrap();
-    assert!(file_info.classes.len() >= 1);
+    assert!(!file_info.classes.is_empty());
 }

@@ -9,6 +9,7 @@ use tree_sitter::Node;
 /// Visitor that extracts entities and relationships from TypeScript/JavaScript AST
 pub struct TypeScriptVisitor<'a> {
     pub source: &'a [u8],
+    #[allow(dead_code)]
     pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
@@ -38,9 +39,7 @@ impl<'a> TypeScriptVisitor<'a> {
 
     /// Get text for a node
     fn node_text(&self, node: Node) -> String {
-        node.utf8_text(self.source)
-            .unwrap_or("")
-            .to_string()
+        node.utf8_text(self.source).unwrap_or("").to_string()
     }
 
     /// Visit a tree-sitter node
@@ -102,7 +101,12 @@ impl<'a> TypeScriptVisitor<'a> {
 
         let func = FunctionEntity {
             name: name.clone(),
-            signature: self.node_text(node).lines().next().unwrap_or("").to_string(),
+            signature: self
+                .node_text(node)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
             visibility: "public".to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
@@ -340,9 +344,7 @@ impl<'a> TypeScriptVisitor<'a> {
                     .map(|n| self.node_text(n))
                     .unwrap_or_else(|| "param".to_string());
 
-                let type_annotation = child
-                    .child_by_field_name("type")
-                    .map(|n| self.node_text(n));
+                let type_annotation = child.child_by_field_name("type").map(|n| self.node_text(n));
 
                 parameters.push(Parameter {
                     name,
@@ -374,7 +376,9 @@ mod tests {
 
         let source = b"function greet(name: string, age: number): void {}";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -393,7 +397,9 @@ mod tests {
 
         let source = b"async function loadData() { await fetch(); }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -409,7 +415,9 @@ mod tests {
 
         let source = b"class MyClass { myMethod() {} }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -427,7 +435,9 @@ mod tests {
 
         let source = b"interface IPerson { name: string; age: number; }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -443,7 +453,9 @@ mod tests {
 
         let source = b"import { useState } from 'react';";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -458,7 +470,9 @@ mod tests {
 
         let source = b"import { useState, useEffect } from 'react';";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -469,7 +483,7 @@ mod tests {
         assert_eq!(visitor.imports[0].symbols.len(), 2);
         assert_eq!(visitor.imports[0].symbols[0], "useState");
         assert_eq!(visitor.imports[0].symbols[1], "useEffect");
-        assert_eq!(visitor.imports[0].is_wildcard, false);
+        assert!(!visitor.imports[0].is_wildcard);
     }
 
     #[test]
@@ -478,7 +492,9 @@ mod tests {
 
         let source = b"import React from 'react';";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -496,7 +512,9 @@ mod tests {
 
         let source = b"import * as Utils from './utils';";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -504,7 +522,7 @@ mod tests {
 
         assert_eq!(visitor.imports.len(), 1);
         assert_eq!(visitor.imports[0].imported, "./utils");
-        assert_eq!(visitor.imports[0].is_wildcard, true);
+        assert!(visitor.imports[0].is_wildcard);
         assert_eq!(visitor.imports[0].alias, Some("Utils".to_string()));
     }
 
@@ -514,7 +532,9 @@ mod tests {
 
         let source = b"import './styles.css';";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -531,7 +551,9 @@ mod tests {
 
         let source = b"import React, { useState, useEffect } from 'react';";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -551,14 +573,16 @@ mod tests {
 
         let source = b"const func = () => { return 42; };";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
         visitor.visit_node(tree.root_node());
 
         // Arrow functions should be extracted
-        assert!(visitor.functions.len() > 0);
+        assert!(!visitor.functions.is_empty());
     }
 
     #[test]
@@ -567,7 +591,9 @@ mod tests {
 
         let source = b"class Calculator { add(a: number, b: number): number { return a + b; } }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -578,7 +604,10 @@ mod tests {
         // Should extract method as a function with parent_class
         assert_eq!(visitor.functions.len(), 1);
         assert_eq!(visitor.functions[0].name, "add");
-        assert_eq!(visitor.functions[0].parent_class, Some("Calculator".to_string()));
+        assert_eq!(
+            visitor.functions[0].parent_class,
+            Some("Calculator".to_string())
+        );
     }
 
     #[test]
@@ -587,7 +616,9 @@ mod tests {
 
         let source = b"class Math { add(a, b) { return a + b; } subtract(a, b) { return a - b; } multiply(a, b) { return a * b; } }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -600,7 +631,10 @@ mod tests {
         assert_eq!(visitor.functions[1].name, "subtract");
         assert_eq!(visitor.functions[2].name, "multiply");
         // All methods should have parent_class set
-        assert!(visitor.functions.iter().all(|f| f.parent_class == Some("Math".to_string())));
+        assert!(visitor
+            .functions
+            .iter()
+            .all(|f| f.parent_class == Some("Math".to_string())));
     }
 
     #[test]
@@ -609,7 +643,9 @@ mod tests {
 
         let source = b"class Person { constructor(name: string) { this.name = name; } }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -619,7 +655,10 @@ mod tests {
         // Should extract constructor
         assert_eq!(visitor.functions.len(), 1);
         assert_eq!(visitor.functions[0].name, "constructor");
-        assert_eq!(visitor.functions[0].parent_class, Some("Person".to_string()));
+        assert_eq!(
+            visitor.functions[0].parent_class,
+            Some("Person".to_string())
+        );
     }
 
     #[test]
@@ -628,7 +667,9 @@ mod tests {
 
         let source = b"class Utils { static format(value: string): string { return value; } }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_typescript::language_typescript()).unwrap();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
@@ -638,7 +679,7 @@ mod tests {
         // Should extract static method
         assert_eq!(visitor.functions.len(), 1);
         assert_eq!(visitor.functions[0].name, "format");
-        assert_eq!(visitor.functions[0].is_static, true);
+        assert!(visitor.functions[0].is_static);
         assert_eq!(visitor.functions[0].parent_class, Some("Utils".to_string()));
     }
 }

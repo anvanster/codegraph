@@ -114,7 +114,7 @@ def broken(
     match result {
         Err(ParserError::ParseError(path, msg)) => {
             assert_eq!(path, PathBuf::from("test.py"));
-            assert!(msg.len() > 0);
+            assert!(!msg.is_empty());
         }
         _ => panic!("Expected ParseError"),
     }
@@ -194,8 +194,12 @@ fn test_parser_metrics() {
     let source1 = "def func1(): pass";
     let source2 = "def func2(): pass";
 
-    parser.parse_source(source1, Path::new("test1.py"), &mut graph).unwrap();
-    parser.parse_source(source2, Path::new("test2.py"), &mut graph).unwrap();
+    parser
+        .parse_source(source1, Path::new("test1.py"), &mut graph)
+        .unwrap();
+    parser
+        .parse_source(source2, Path::new("test2.py"), &mut graph)
+        .unwrap();
 
     let metrics = parser.metrics();
     assert_eq!(metrics.files_attempted, 2);
@@ -209,7 +213,9 @@ fn test_parser_reset_metrics() {
     let mut parser = PythonParser::new();
     let mut graph = CodeGraph::in_memory().unwrap();
 
-    parser.parse_source("def func(): pass", Path::new("test.py"), &mut graph).unwrap();
+    parser
+        .parse_source("def func(): pass", Path::new("test.py"), &mut graph)
+        .unwrap();
 
     let metrics_before = parser.metrics();
     assert_eq!(metrics_before.files_succeeded, 1);

@@ -50,8 +50,8 @@ mod parser_impl;
 
 // Re-export parser-api types for convenience
 pub use codegraph_parser_api::{
-    CodeParser, FileInfo as ApiFileInfo, ParserConfig as ApiParserConfig,
-    ParserError, ProjectInfo as ApiProjectInfo,
+    CodeParser, FileInfo as ApiFileInfo, ParserConfig as ApiParserConfig, ParserError,
+    ProjectInfo as ApiProjectInfo,
 };
 
 // Export new parser implementation

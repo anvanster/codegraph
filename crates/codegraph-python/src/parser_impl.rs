@@ -5,9 +5,7 @@
 //! with the unified parser API.
 
 use codegraph::{CodeGraph, NodeId};
-use codegraph_parser_api::{
-    CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics,
-};
+use codegraph_parser_api::{CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -36,7 +34,13 @@ impl PythonParser {
     }
 
     /// Update metrics after parsing a file
-    fn update_metrics(&self, success: bool, duration: Duration, entities: usize, relationships: usize) {
+    fn update_metrics(
+        &self,
+        success: bool,
+        duration: Duration,
+        entities: usize,
+        relationships: usize,
+    ) {
         let mut metrics = self.metrics.lock().unwrap();
         metrics.files_attempted += 1;
         if success {
@@ -77,13 +81,15 @@ impl PythonParser {
                 props = props.with("doc", doc.clone());
             }
 
-            let id = graph.add_node(NodeType::CodeFile, props)
+            let id = graph
+                .add_node(NodeType::CodeFile, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
             node_map.insert(module.name.clone(), id);
             id
         } else {
             // Create a default file node
-            let file_name = file_path.file_stem()
+            let file_name = file_path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
@@ -92,7 +98,8 @@ impl PythonParser {
                 .with("path", file_path.display().to_string())
                 .with("language", "python");
 
-            let id = graph.add_node(NodeType::CodeFile, props)
+            let id = graph
+                .add_node(NodeType::CodeFile, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
             node_map.insert(file_name, id);
             id
@@ -116,14 +123,16 @@ impl PythonParser {
                 props = props.with("return_type", return_type.clone());
             }
 
-            let func_id = graph.add_node(NodeType::Function, props)
+            let func_id = graph
+                .add_node(NodeType::Function, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(func.name.clone(), func_id);
             function_ids.push(func_id);
 
             // Link function to file
-            graph.add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())
+            graph
+                .add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
 
@@ -140,14 +149,16 @@ impl PythonParser {
                 props = props.with("doc", doc.clone());
             }
 
-            let class_id = graph.add_node(NodeType::Class, props)
+            let class_id = graph
+                .add_node(NodeType::Class, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(class.name.clone(), class_id);
             class_ids.push(class_id);
 
             // Link class to file
-            graph.add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())
+            graph
+                .add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             // Add methods
@@ -166,14 +177,16 @@ impl PythonParser {
                     method_props = method_props.with("doc", doc.clone());
                 }
 
-                let method_id = graph.add_node(NodeType::Function, method_props)
+                let method_id = graph
+                    .add_node(NodeType::Function, method_props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
                 node_map.insert(method_name, method_id);
                 function_ids.push(method_id);
 
                 // Link method to class
-                graph.add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
+                graph
+                    .add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
@@ -190,14 +203,16 @@ impl PythonParser {
                 props = props.with("doc", doc.clone());
             }
 
-            let trait_id = graph.add_node(NodeType::Interface, props)
+            let trait_id = graph
+                .add_node(NodeType::Interface, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(trait_entity.name.clone(), trait_id);
             trait_ids.push(trait_id);
 
             // Link trait to file
-            graph.add_edge(file_id, trait_id, EdgeType::Contains, PropertyMap::new())
+            graph
+                .add_edge(file_id, trait_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
 
@@ -213,7 +228,8 @@ impl PythonParser {
                     .with("name", imported_module.clone())
                     .with("is_external", "true");
 
-                let id = graph.add_node(NodeType::Module, props)
+                let id = graph
+                    .add_node(NodeType::Module, props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
                 node_map.insert(imported_module.clone(), id);
                 id
@@ -232,31 +248,36 @@ impl PythonParser {
             if !import.symbols.is_empty() {
                 edge_props = edge_props.with("symbols", import.symbols.join(","));
             }
-            graph.add_edge(file_id, import_id, EdgeType::Imports, edge_props)
+            graph
+                .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
 
         // Add call relationships
         for call in &ir.calls {
             if let (Some(&caller_id), Some(&callee_id)) =
-                (node_map.get(&call.caller), node_map.get(&call.callee)) {
+                (node_map.get(&call.caller), node_map.get(&call.callee))
+            {
                 let edge_props = PropertyMap::new()
                     .with("call_site_line", call.call_site_line.to_string())
                     .with("is_direct", call.is_direct.to_string());
 
-                graph.add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
+                graph
+                    .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
 
         // Add inheritance relationships
         for inheritance in &ir.inheritance {
-            if let (Some(&child_id), Some(&parent_id)) =
-                (node_map.get(&inheritance.child), node_map.get(&inheritance.parent)) {
-                let edge_props = PropertyMap::new()
-                    .with("order", inheritance.order.to_string());
+            if let (Some(&child_id), Some(&parent_id)) = (
+                node_map.get(&inheritance.child),
+                node_map.get(&inheritance.parent),
+            ) {
+                let edge_props = PropertyMap::new().with("order", inheritance.order.to_string());
 
-                graph.add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
+                graph
+                    .add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
                     .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
@@ -297,11 +318,7 @@ impl CodeParser for PythonParser {
         &[".py", ".pyw"]
     }
 
-    fn parse_file(
-        &self,
-        path: &Path,
-        graph: &mut CodeGraph,
-    ) -> Result<FileInfo, ParserError> {
+    fn parse_file(&self, path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
 
         // Check file extension
@@ -358,11 +375,10 @@ impl CodeParser for PythonParser {
             ..Default::default()
         };
 
-        let ir = crate::extractor::extract(source, file_path, &old_config)
-            .map_err(|e| {
-                self.update_metrics(false, start.elapsed(), 0, 0);
-                ParserError::ParseError(file_path.to_path_buf(), e)
-            })?;
+        let ir = crate::extractor::extract(source, file_path, &old_config).map_err(|e| {
+            self.update_metrics(false, start.elapsed(), 0, 0);
+            ParserError::ParseError(file_path.to_path_buf(), e)
+        })?;
 
         // Count entities and relationships
         let entity_count = ir.entity_count();

@@ -3,12 +3,9 @@
 //! This module parses Rust source code and extracts entities and relationships
 //! into a CodeIR representation.
 
-use codegraph_parser_api::{
-    CallRelation, ClassEntity, CodeIR, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, ModuleEntity, Parameter, ParserConfig, ParserError, TraitEntity,
-};
+use codegraph_parser_api::{CodeIR, ModuleEntity, ParserConfig, ParserError};
 use std::path::Path;
-use syn::{visit::Visit, File, Item};
+use syn::{visit::Visit, File};
 
 use crate::visitor::RustVisitor;
 
@@ -27,9 +24,8 @@ pub fn extract(
     config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
     // Parse the source code into a syn AST
-    let syntax_tree = syn::parse_file(source).map_err(|e| {
-        ParserError::SyntaxError(file_path.to_path_buf(), 0, 0, e.to_string())
-    })?;
+    let syntax_tree = syn::parse_file(source)
+        .map_err(|e| ParserError::SyntaxError(file_path.to_path_buf(), 0, 0, e.to_string()))?;
 
     // Create IR for this file
     let mut ir = CodeIR::new(file_path.to_path_buf());
@@ -145,7 +141,10 @@ pub trait MyTrait {
         let result = extract(source, Path::new("test.rs"), &config);
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ParserError::SyntaxError(_, _, _, _)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ParserError::SyntaxError(_, _, _, _)
+        ));
     }
 
     #[test]
@@ -184,7 +183,7 @@ impl Calculator {
         let ir = result.unwrap();
         assert_eq!(ir.classes.len(), 1);
         // Method should be extracted
-        assert!(ir.functions.len() > 0 || ir.classes[0].methods.len() > 0);
+        assert!(!ir.functions.is_empty() || !ir.classes[0].methods.is_empty());
     }
 
     #[test]
@@ -253,8 +252,8 @@ pub fn greet(p: &Person) {
         assert_eq!(ir.traits[0].name, "Display");
         assert_eq!(ir.classes.len(), 1);
         assert_eq!(ir.classes[0].name, "Person");
-        assert!(ir.functions.len() >= 1); // greet function
-        assert!(ir.imports.len() >= 1); // use std::fmt
+        assert!(!ir.functions.is_empty()); // greet function
+        assert!(!ir.imports.is_empty()); // use std::fmt
     }
 
     #[test]
@@ -329,7 +328,7 @@ impl Speak for Dog {
         let ir = result.unwrap();
         assert_eq!(ir.traits.len(), 1);
         assert_eq!(ir.classes.len(), 1);
-        assert!(ir.implementations.len() > 0 || ir.classes[0].implemented_traits.len() > 0);
+        assert!(!ir.implementations.is_empty() || !ir.classes[0].implemented_traits.is_empty());
     }
 
     #[test]

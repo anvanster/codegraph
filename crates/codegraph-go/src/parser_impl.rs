@@ -33,7 +33,13 @@ impl GoParser {
         }
     }
 
-    fn update_metrics(&self, success: bool, duration: Duration, entities: usize, relationships: usize) {
+    fn update_metrics(
+        &self,
+        success: bool,
+        duration: Duration,
+        entities: usize,
+        relationships: usize,
+    ) {
         let mut metrics = self.metrics.lock().unwrap();
         metrics.files_attempted += 1;
         if success {
@@ -46,7 +52,12 @@ impl GoParser {
         metrics.total_relationships += relationships;
     }
 
-    fn ir_to_graph(&self, ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Result<FileInfo, ParserError> {
+    fn ir_to_graph(
+        &self,
+        ir: &CodeIR,
+        graph: &mut CodeGraph,
+        file_path: &Path,
+    ) -> Result<FileInfo, ParserError> {
         mapper::ir_to_graph(ir, graph, file_path)
     }
 }
@@ -68,13 +79,18 @@ impl CodeParser for GoParser {
 
     fn parse_file(&self, path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
-        let metadata = fs::metadata(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let metadata =
+            fs::metadata(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
 
         if metadata.len() as usize > self.config.max_file_size {
-            return Err(ParserError::FileTooLarge(path.to_path_buf(), metadata.len() as usize));
+            return Err(ParserError::FileTooLarge(
+                path.to_path_buf(),
+                metadata.len() as usize,
+            ));
         }
 
-        let source = fs::read_to_string(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let source =
+            fs::read_to_string(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
         let result = self.parse_source(&source, path, graph);
 
         let duration = start.elapsed();
@@ -87,7 +103,12 @@ impl CodeParser for GoParser {
         result
     }
 
-    fn parse_source(&self, source: &str, file_path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError> {
+    fn parse_source(
+        &self,
+        source: &str,
+        file_path: &Path,
+        graph: &mut CodeGraph,
+    ) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
         let ir = extractor::extract(source, file_path, &self.config)?;
         let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;

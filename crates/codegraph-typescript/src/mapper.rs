@@ -150,7 +150,7 @@ pub fn ir_to_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codegraph_parser_api::{FunctionEntity, ClassEntity, TraitEntity};
+    use codegraph_parser_api::{ClassEntity, FunctionEntity, TraitEntity};
     use std::path::PathBuf;
 
     #[test]
@@ -208,7 +208,11 @@ mod tests {
     #[test]
     fn test_ir_to_graph_with_module() {
         let mut ir = CodeIR::new(PathBuf::from("test.ts"));
-        ir.set_module(codegraph_parser_api::ModuleEntity::new("test", "test.ts", "typescript"));
+        ir.set_module(codegraph_parser_api::ModuleEntity::new(
+            "test",
+            "test.ts",
+            "typescript",
+        ));
 
         let mut graph = CodeGraph::in_memory().unwrap();
         let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.ts").as_path());
@@ -234,6 +238,9 @@ mod tests {
 
         // Verify the function has is_async property
         let func_node = graph.get_node(file_info.functions[0]).unwrap();
-        assert_eq!(func_node.properties.get("is_async"), Some(&codegraph::PropertyValue::Bool(true)));
+        assert_eq!(
+            func_node.properties.get("is_async"),
+            Some(&codegraph::PropertyValue::Bool(true))
+        );
     }
 }

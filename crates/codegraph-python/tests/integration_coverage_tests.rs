@@ -69,7 +69,10 @@ if __name__ == "__main__":
 
     // Verify entities
     assert_eq!(file_info.classes.len(), 1, "Should have Calculator class");
-    assert!(file_info.functions.len() >= 3, "Should have methods and functions");
+    assert!(
+        file_info.functions.len() >= 3,
+        "Should have methods and functions"
+    );
     assert_eq!(file_info.imports.len(), 3, "Should have 3 imports");
 
     // Verify metrics were tracked
@@ -224,14 +227,23 @@ if __name__ == "__main__":
     let project_info = result.unwrap();
 
     // Verify project structure
-    assert_eq!(project_info.files.len(), 6, "Should parse all Python files");
-    assert!(project_info.total_classes >= 2, "Should have User and Product classes");
-    assert!(project_info.total_functions >= 2, "Should have multiple functions");
-    assert!(project_info.total_parse_time.as_nanos() > 0, "Should track parse time");
+    assert_eq!(project_info.files.len(), 7, "Should parse all Python files");
+    assert!(
+        project_info.total_classes >= 2,
+        "Should have User and Product classes"
+    );
+    assert!(
+        project_info.total_functions >= 2,
+        "Should have multiple functions"
+    );
+    assert!(
+        project_info.total_parse_time.as_nanos() > 0,
+        "Should track parse time"
+    );
 
     // Verify metrics
     let metrics = parser.metrics();
-    assert_eq!(metrics.files_succeeded, 6);
+    assert_eq!(metrics.files_succeeded, 7);
     assert!(metrics.total_entities > 0);
 }
 
@@ -334,8 +346,14 @@ class MyClass:
     let file_info = result.unwrap();
 
     // Verify nodes were created
-    assert!(!file_info.file_id.to_string().is_empty(), "Should have file node");
-    assert!(!file_info.functions.is_empty(), "Should have function nodes");
+    assert!(
+        !file_info.file_id.to_string().is_empty(),
+        "Should have file node"
+    );
+    assert!(
+        !file_info.functions.is_empty(),
+        "Should have function nodes"
+    );
     assert!(!file_info.classes.is_empty(), "Should have class nodes");
 }
 
@@ -385,16 +403,15 @@ fn test_parse_large_file_performance() {
     for i in 0..100 {
         source.push_str(&format!(
             r#"
-def function_{}():
-    """Docstring for function {}"""
-    return {}
+def function_{i}():
+    """Docstring for function {i}"""
+    return {i}
 
-class Class_{}:
-    """Docstring for class {}"""
-    def method_{}(self):
-        return {}
-"#,
-            i, i, i, i, i, i, i
+class Class_{i}:
+    """Docstring for class {i}"""
+    def method_{i}(self):
+        return {i}
+"#
         ));
     }
 
@@ -427,8 +444,8 @@ fn test_parallel_file_parsing() {
     // Create multiple files
     for i in 0..5 {
         std::fs::write(
-            temp_dir.path().join(format!("file{}.py", i)),
-            format!("def func{}(): pass", i),
+            temp_dir.path().join(format!("file{i}.py")),
+            format!("def func{i}(): pass"),
         )
         .unwrap();
     }
@@ -451,7 +468,7 @@ fn test_parse_very_long_line() {
 
     // Create a very long line (but valid Python)
     let long_string = "x".repeat(1000);
-    let source = format!(r#"def func(): return "{}""#, long_string);
+    let source = format!(r#"def func(): return "{long_string}""#);
 
     let result = parser.parse_source(&source, Path::new("long_line.py"), &mut graph);
     assert!(result.is_ok());
@@ -522,7 +539,7 @@ fn test_project_info_success_rate() {
     // Create 3 good files
     for i in 0..3 {
         std::fs::write(
-            temp_dir.path().join(format!("good{}.py", i)),
+            temp_dir.path().join(format!("good{i}.py")),
             "def foo(): pass",
         )
         .unwrap();
@@ -551,7 +568,7 @@ fn test_avg_parse_time_calculation() {
 
     for i in 0..3 {
         std::fs::write(
-            temp_dir.path().join(format!("file{}.py", i)),
+            temp_dir.path().join(format!("file{i}.py")),
             "def foo(): pass",
         )
         .unwrap();

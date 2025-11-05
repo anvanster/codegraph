@@ -7,6 +7,7 @@ use tree_sitter::Node;
 
 pub struct GoVisitor<'a> {
     pub source: &'a [u8],
+    #[allow(dead_code)]
     pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub structs: Vec<ClassEntity>,
@@ -46,11 +47,19 @@ impl<'a> GoVisitor<'a> {
     }
 
     fn visit_function(&mut self, node: Node) {
-        let name = node.child_by_field_name("name").map(|n| self.node_text(n)).unwrap_or_else(|| "anonymous".to_string());
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "anonymous".to_string());
 
         let func = FunctionEntity {
             name,
-            signature: self.node_text(node).lines().next().unwrap_or("").to_string(),
+            signature: self
+                .node_text(node)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
             visibility: "public".to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
@@ -69,11 +78,19 @@ impl<'a> GoVisitor<'a> {
     }
 
     fn visit_method(&mut self, node: Node) {
-        let name = node.child_by_field_name("name").map(|n| self.node_text(n)).unwrap_or_else(|| "method".to_string());
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "method".to_string());
 
         let func = FunctionEntity {
             name,
-            signature: self.node_text(node).lines().next().unwrap_or("").to_string(),
+            signature: self
+                .node_text(node)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
             visibility: "public".to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
@@ -95,7 +112,10 @@ impl<'a> GoVisitor<'a> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "type_spec" {
-                let name = child.child_by_field_name("name").map(|n| self.node_text(n)).unwrap_or_else(|| "Type".to_string());
+                let name = child
+                    .child_by_field_name("name")
+                    .map(|n| self.node_text(n))
+                    .unwrap_or_else(|| "Type".to_string());
                 let type_node = child.child_by_field_name("type");
 
                 if let Some(type_node) = type_node {
@@ -208,7 +228,12 @@ impl<'a> GoVisitor<'a> {
                     // Check text content for special cases
                     if text == "." {
                         is_wildcard = true;
-                    } else if text != "_" && !text.trim().is_empty() && kind != "(" && kind != ")" && kind != "\"" {
+                    } else if text != "_"
+                        && !text.trim().is_empty()
+                        && kind != "("
+                        && kind != ")"
+                        && kind != "\""
+                    {
                         // Might be an unrecognized alias format
                         if !path.is_empty() {
                             // Only set alias if we haven't found the path yet would mean this comes before
@@ -353,7 +378,11 @@ mod tests {
         visitor.visit_node(tree.root_node());
 
         // Should extract 3 individual imports, not 1 block
-        assert_eq!(visitor.imports.len(), 3, "Should extract 3 individual imports");
+        assert_eq!(
+            visitor.imports.len(),
+            3,
+            "Should extract 3 individual imports"
+        );
         assert_eq!(visitor.imports[0].imported, "fmt");
         assert_eq!(visitor.imports[1].imported, "os");
         assert_eq!(visitor.imports[2].imported, "io");
@@ -374,7 +403,7 @@ mod tests {
         assert_eq!(visitor.imports.len(), 1);
         assert_eq!(visitor.imports[0].imported, "fmt");
         assert_eq!(visitor.imports[0].alias, Some("f".to_string()));
-        assert_eq!(visitor.imports[0].is_wildcard, false);
+        assert!(!visitor.imports[0].is_wildcard);
     }
 
     #[test]
@@ -391,7 +420,7 @@ mod tests {
 
         assert_eq!(visitor.imports.len(), 1);
         assert_eq!(visitor.imports[0].imported, "fmt");
-        assert_eq!(visitor.imports[0].is_wildcard, true);
+        assert!(visitor.imports[0].is_wildcard);
         assert_eq!(visitor.imports[0].alias, None);
     }
 
@@ -410,7 +439,7 @@ mod tests {
         assert_eq!(visitor.imports.len(), 1);
         assert_eq!(visitor.imports[0].imported, "database/sql");
         assert_eq!(visitor.imports[0].alias, None); // _ is ignored
-        assert_eq!(visitor.imports[0].is_wildcard, false);
+        assert!(!visitor.imports[0].is_wildcard);
     }
 
     #[test]
@@ -430,16 +459,16 @@ mod tests {
         // Import with alias
         assert_eq!(visitor.imports[0].imported, "fmt");
         assert_eq!(visitor.imports[0].alias, Some("f".to_string()));
-        assert_eq!(visitor.imports[0].is_wildcard, false);
+        assert!(!visitor.imports[0].is_wildcard);
 
         // Import with dot (wildcard)
         assert_eq!(visitor.imports[1].imported, "os");
-        assert_eq!(visitor.imports[1].is_wildcard, true);
+        assert!(visitor.imports[1].is_wildcard);
         assert_eq!(visitor.imports[1].alias, None);
 
         // Import with blank identifier
         assert_eq!(visitor.imports[2].imported, "encoding/json");
         assert_eq!(visitor.imports[2].alias, None);
-        assert_eq!(visitor.imports[2].is_wildcard, false);
+        assert!(!visitor.imports[2].is_wildcard);
     }
 }

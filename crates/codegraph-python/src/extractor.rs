@@ -1,9 +1,9 @@
 // Use parser-API types instead of local duplicates
-use codegraph_parser_api::{
-    CallRelation, ClassEntity, CodeIR, FunctionEntity, ImportRelation,
-    InheritanceRelation, ModuleEntity,
-};
 use crate::config::ParserConfig;
+use codegraph_parser_api::{
+    CallRelation, ClassEntity, CodeIR, FunctionEntity, ImportRelation, InheritanceRelation,
+    ModuleEntity,
+};
 use rustpython_ast::Stmt;
 use rustpython_parser::{ast, Parse};
 use std::path::Path;
@@ -12,7 +12,7 @@ use std::path::Path;
 ///
 /// This is a simplified implementation that will be expanded in subsequent tasks.
 /// For now, it provides basic extraction of functions and classes.
-pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result<CodeIR, String> {
+pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<CodeIR, String> {
     // Parse the source code
     let ast = ast::Suite::parse(source, &file_path.display().to_string())
         .map_err(|e| format!("Parse error: {e:?}"))?;
@@ -36,6 +36,11 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
     for (idx, stmt) in ast.iter().enumerate() {
         match stmt {
             Stmt::FunctionDef(func_def) => {
+                // Skip if config excludes this function
+                if should_skip_function(func_def.name.as_str(), config) {
+                    continue;
+                }
+
                 // Create basic function entity (top-level functions only)
                 let line_start = idx + 1; // Simplified line numbering
                 let line_end = line_start + func_def.body.len();
@@ -50,10 +55,15 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                 }
             }
             Stmt::AsyncFunctionDef(func_def) => {
+                // Skip if config excludes this function
+                if should_skip_function(func_def.name.as_str(), config) {
+                    continue;
+                }
+
                 let line_start = idx + 1;
                 let line_end = line_start + func_def.body.len();
-                let func = FunctionEntity::new(func_def.name.as_str(), line_start, line_end)
-                    .async_fn();
+                let func =
+                    FunctionEntity::new(func_def.name.as_str(), line_start, line_end).async_fn();
                 ir.add_function(func);
 
                 // Extract calls from async function body
@@ -129,10 +139,8 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                 // Extract inheritance relationships
                 for base in &class_def.bases {
                     if let Some(parent_name) = extract_base_class_name(base) {
-                        let inheritance = InheritanceRelation::new(
-                            class_def.name.as_str(),
-                            parent_name,
-                        );
+                        let inheritance =
+                            InheritanceRelation::new(class_def.name.as_str(), parent_name);
                         ir.add_inheritance(inheritance);
                     }
                 }
@@ -186,8 +194,8 @@ pub fn extract(source: &str, file_path: &Path, _config: &ParserConfig) -> Result
                         .iter()
                         .map(|alias| alias.name.to_string())
                         .collect();
-                    let import_rel = ImportRelation::new(&importer_name, &from_module)
-                        .with_symbols(symbols);
+                    let import_rel =
+                        ImportRelation::new(&importer_name, &from_module).with_symbols(symbols);
                     ir.add_import(import_rel);
                 }
             }
@@ -381,6 +389,21 @@ fn extract_base_class_name(expr: &ast::Expr) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Helper function to determine if a function should be skipped based on config
+fn should_skip_function(name: &str, config: &ParserConfig) -> bool {
+    // Skip private functions if config says so
+    if !config.include_private && name.starts_with('_') {
+        return true;
+    }
+
+    // Skip test functions if config says so
+    if !config.include_tests && (name.starts_with("test_") || name.starts_with("Test")) {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]

@@ -9,9 +9,8 @@ use codegraph_parser_api::{
 };
 use syn::visit::Visit;
 use syn::{
-    Attribute, FnArg, GenericParam, Ident, ImplItem, Item, ItemEnum, ItemFn, ItemImpl, ItemMod,
-    ItemStruct, ItemTrait, ItemUse, Pat, PathArguments, ReturnType, Signature, TraitItem, Type,
-    Visibility,
+    Attribute, FnArg, GenericParam, ImplItem, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemTrait,
+    ItemUse, Pat, ReturnType, Signature, TraitItem, Type, Visibility,
 };
 
 /// Visitor that extracts entities and relationships from Rust AST
@@ -84,13 +83,13 @@ impl RustVisitor {
     fn extract_parameters(sig: &Signature) -> Vec<Parameter> {
         sig.inputs
             .iter()
-            .filter_map(|arg| match arg {
-                FnArg::Receiver(_) => Some(Parameter {
+            .map(|arg| match arg {
+                FnArg::Receiver(_) => Parameter {
                     name: "self".to_string(),
                     type_annotation: Some("Self".to_string()),
                     default_value: None,
                     is_variadic: false,
-                }),
+                },
                 FnArg::Typed(pat_type) => {
                     let name = if let Pat::Ident(ident) = &*pat_type.pat {
                         ident.ident.to_string()
@@ -100,12 +99,12 @@ impl RustVisitor {
 
                     let type_annotation = quote::quote!(#pat_type.ty).to_string();
 
-                    Some(Parameter {
+                    Parameter {
                         name,
                         type_annotation: Some(type_annotation),
                         default_value: None,
                         is_variadic: false,
-                    })
+                    }
                 }
             })
             .collect()
@@ -538,7 +537,7 @@ impl MyStruct {
         assert_eq!(visitor.classes.len(), 1);
         // Methods should be extracted
         let struct_with_methods = &visitor.classes[0];
-        assert!(struct_with_methods.methods.len() > 0 || visitor.functions.len() > 0);
+        assert!(!struct_with_methods.methods.is_empty() || !visitor.functions.is_empty());
     }
 
     #[test]
@@ -566,7 +565,7 @@ use std::io::{self, Read};
         let mut visitor = RustVisitor::new(ParserConfig::default());
         visitor.visit_file(&syntax_tree);
 
-        assert!(visitor.imports.len() >= 1);
+        assert!(!visitor.imports.is_empty());
     }
 
     #[test]
@@ -582,7 +581,7 @@ pub struct Wrapper<T> {
 
         assert_eq!(visitor.classes.len(), 1);
         assert_eq!(visitor.classes[0].name, "Wrapper");
-        assert!(visitor.classes[0].type_parameters.len() > 0);
+        assert!(!visitor.classes[0].type_parameters.is_empty());
     }
 
     #[test]
@@ -604,7 +603,10 @@ impl Display for Item {
 
         assert_eq!(visitor.traits.len(), 1);
         assert_eq!(visitor.classes.len(), 1);
-        assert!(visitor.implementations.len() > 0 || visitor.classes[0].implemented_traits.len() > 0);
+        assert!(
+            !visitor.implementations.is_empty()
+                || !visitor.classes[0].implemented_traits.is_empty()
+        );
     }
 
     #[test]
@@ -637,7 +639,9 @@ pub(crate) fn crate_fn() {}
 
         assert_eq!(visitor.functions.len(), 3);
         // Check that visibility is captured
-        let public_count = visitor.functions.iter()
+        let public_count = visitor
+            .functions
+            .iter()
             .filter(|f| f.visibility.contains("public"))
             .count();
         assert!(public_count >= 1);
@@ -675,7 +679,7 @@ impl Struct1 {
 
         assert_eq!(visitor.traits.len(), 1);
         assert!(visitor.classes.len() >= 2); // Struct1 and Enum1
-        assert!(visitor.functions.len() >= 1);
-        assert!(visitor.imports.len() >= 1);
+        assert!(!visitor.functions.is_empty());
+        assert!(!visitor.imports.is_empty());
     }
 }

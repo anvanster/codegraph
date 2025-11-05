@@ -1,8 +1,6 @@
 use crate::{
     entities::{ClassEntity, FunctionEntity, ModuleEntity, TraitEntity},
-    relationships::{
-        CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation,
-    },
+    relationships::{CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation},
 };
 use std::path::PathBuf;
 
@@ -60,10 +58,7 @@ impl CodeIR {
 
     /// Total number of relationships
     pub fn relationship_count(&self) -> usize {
-        self.calls.len()
-            + self.imports.len()
-            + self.inheritance.len()
-            + self.implementations.len()
+        self.calls.len() + self.imports.len() + self.inheritance.len() + self.implementations.len()
     }
 
     /// Add a module entity

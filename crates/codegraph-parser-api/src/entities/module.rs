@@ -23,7 +23,11 @@ pub struct ModuleEntity {
 }
 
 impl ModuleEntity {
-    pub fn new(name: impl Into<String>, path: impl Into<String>, language: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        path: impl Into<String>,
+        language: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             path: path.into(),

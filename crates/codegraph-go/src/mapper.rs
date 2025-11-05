@@ -1,12 +1,16 @@
 //! Mapper for converting CodeIR to CodeGraph nodes and edges
 
-use codegraph::{EdgeType, NodeType, PropertyMap, CodeGraph, NodeId};
+use codegraph::{CodeGraph, EdgeType, NodeId, NodeType, PropertyMap};
 use codegraph_parser_api::{CodeIR, FileInfo, ParserError};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Result<FileInfo, ParserError> {
+pub fn ir_to_graph(
+    ir: &CodeIR,
+    graph: &mut CodeGraph,
+    file_path: &Path,
+) -> Result<FileInfo, ParserError> {
     let mut node_map: HashMap<String, NodeId> = HashMap::new();
     let mut function_ids = Vec::new();
     let mut class_ids = Vec::new();
@@ -25,18 +29,24 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
             props = props.with("doc", doc.clone());
         }
 
-        let id = graph.add_node(NodeType::CodeFile, props)
+        let id = graph
+            .add_node(NodeType::CodeFile, props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
         node_map.insert(module.name.clone(), id);
         id
     } else {
-        let name = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+        let name = file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
         let props = PropertyMap::new()
             .with("name", name.clone())
             .with("path", file_path.display().to_string())
             .with("language", "go");
 
-        let id = graph.add_node(NodeType::CodeFile, props)
+        let id = graph
+            .add_node(NodeType::CodeFile, props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
         node_map.insert(name, id);
         id
@@ -60,14 +70,16 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
             props = props.with("return_type", return_type.clone());
         }
 
-        let func_id = graph.add_node(NodeType::Function, props)
+        let func_id = graph
+            .add_node(NodeType::Function, props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
         node_map.insert(func.name.clone(), func_id);
         function_ids.push(func_id);
 
         // Link function to file
-        graph.add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())
+        graph
+            .add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
     }
 
@@ -84,14 +96,16 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
             props = props.with("doc", doc.clone());
         }
 
-        let class_id = graph.add_node(NodeType::Class, props)
+        let class_id = graph
+            .add_node(NodeType::Class, props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
         node_map.insert(class.name.clone(), class_id);
         class_ids.push(class_id);
 
         // Link class to file
-        graph.add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())
+        graph
+            .add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
         // Add methods
@@ -110,14 +124,16 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
                 method_props = method_props.with("doc", doc.clone());
             }
 
-            let method_id = graph.add_node(NodeType::Function, method_props)
+            let method_id = graph
+                .add_node(NodeType::Function, method_props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
             node_map.insert(method_name, method_id);
             function_ids.push(method_id);
 
             // Link method to class
-            graph.add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
+            graph
+                .add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
     }
@@ -134,14 +150,16 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
             props = props.with("doc", doc.clone());
         }
 
-        let trait_id = graph.add_node(NodeType::Interface, props)
+        let trait_id = graph
+            .add_node(NodeType::Interface, props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
         node_map.insert(interface.name.clone(), trait_id);
         trait_ids.push(trait_id);
 
         // Link interface to file
-        graph.add_edge(file_id, trait_id, EdgeType::Contains, PropertyMap::new())
+        graph
+            .add_edge(file_id, trait_id, EdgeType::Contains, PropertyMap::new())
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
     }
 
@@ -157,7 +175,8 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
                 .with("name", imported_module.clone())
                 .with("is_external", "true");
 
-            let id = graph.add_node(NodeType::Module, props)
+            let id = graph
+                .add_node(NodeType::Module, props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
             node_map.insert(imported_module.clone(), id);
             id
@@ -176,31 +195,36 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
         if !import.symbols.is_empty() {
             edge_props = edge_props.with("symbols", import.symbols.join(","));
         }
-        graph.add_edge(file_id, import_id, EdgeType::Imports, edge_props)
+        graph
+            .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;
     }
 
     // Add call relationships
     for call in &ir.calls {
         if let (Some(&caller_id), Some(&callee_id)) =
-            (node_map.get(&call.caller), node_map.get(&call.callee)) {
+            (node_map.get(&call.caller), node_map.get(&call.callee))
+        {
             let edge_props = PropertyMap::new()
                 .with("call_site_line", call.call_site_line.to_string())
                 .with("is_direct", call.is_direct.to_string());
 
-            graph.add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
+            graph
+                .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
     }
 
     // Add inheritance relationships
     for inheritance in &ir.inheritance {
-        if let (Some(&child_id), Some(&parent_id)) =
-            (node_map.get(&inheritance.child), node_map.get(&inheritance.parent)) {
-            let edge_props = PropertyMap::new()
-                .with("order", inheritance.order.to_string());
+        if let (Some(&child_id), Some(&parent_id)) = (
+            node_map.get(&inheritance.child),
+            node_map.get(&inheritance.parent),
+        ) {
+            let edge_props = PropertyMap::new().with("order", inheritance.order.to_string());
 
-            graph.add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
+            graph
+                .add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
     }
@@ -228,7 +252,7 @@ pub fn ir_to_graph(ir: &CodeIR, graph: &mut CodeGraph, file_path: &Path) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codegraph_parser_api::{FunctionEntity, ClassEntity, TraitEntity, ImportRelation};
+    use codegraph_parser_api::{ClassEntity, FunctionEntity, ImportRelation, TraitEntity};
     use std::path::PathBuf;
 
     #[test]
@@ -286,7 +310,9 @@ mod tests {
     #[test]
     fn test_ir_to_graph_with_module() {
         let mut ir = CodeIR::new(PathBuf::from("test.go"));
-        ir.set_module(codegraph_parser_api::ModuleEntity::new("main", "test.go", "go"));
+        ir.set_module(codegraph_parser_api::ModuleEntity::new(
+            "main", "test.go", "go",
+        ));
 
         let mut graph = CodeGraph::in_memory().unwrap();
         let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.go").as_path());
@@ -347,7 +373,13 @@ mod tests {
 
         // Verify function properties are set
         let func_node = graph.get_node(file_info.functions[0]).unwrap();
-        assert_eq!(func_node.properties.get("name"), Some(&codegraph::PropertyValue::String("publicFunc".to_string())));
-        assert_eq!(func_node.properties.get("visibility"), Some(&codegraph::PropertyValue::String("public".to_string())));
+        assert_eq!(
+            func_node.properties.get("name"),
+            Some(&codegraph::PropertyValue::String("publicFunc".to_string()))
+        );
+        assert_eq!(
+            func_node.properties.get("visibility"),
+            Some(&codegraph::PropertyValue::String("public".to_string()))
+        );
     }
 }

@@ -81,16 +81,12 @@ impl CodeParser for TypeScriptParser {
         &[".ts", ".tsx", ".js", ".jsx"]
     }
 
-    fn parse_file(
-        &self,
-        path: &Path,
-        graph: &mut CodeGraph,
-    ) -> Result<FileInfo, ParserError> {
+    fn parse_file(&self, path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
 
         // Check file size
-        let metadata = fs::metadata(path)
-            .map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let metadata =
+            fs::metadata(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
 
         if metadata.len() as usize > self.config.max_file_size {
             return Err(ParserError::FileTooLarge(
@@ -100,8 +96,8 @@ impl CodeParser for TypeScriptParser {
         }
 
         // Read file
-        let source = fs::read_to_string(path)
-            .map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let source =
+            fs::read_to_string(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
 
         // Parse source
         let result = self.parse_source(&source, path, graph);

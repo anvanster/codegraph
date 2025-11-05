@@ -3,7 +3,7 @@
 //! This module handles the conversion of the intermediate representation (IR)
 //! into actual graph nodes and edges in the CodeGraph database.
 
-use codegraph::{EdgeType, NodeType, PropertyMap, CodeGraph, NodeId};
+use codegraph::{CodeGraph, EdgeType, NodeId, NodeType, PropertyMap};
 use codegraph_parser_api::{CodeIR, FileInfo, ParserError};
 use std::collections::HashMap;
 use std::path::Path;
@@ -230,16 +230,22 @@ pub fn ir_to_graph(
             node_map.get(&impl_rel.trait_name),
         ) {
             graph
-                .add_edge(implementor_id, trait_id, EdgeType::Implements, PropertyMap::new())
+                .add_edge(
+                    implementor_id,
+                    trait_id,
+                    EdgeType::Implements,
+                    PropertyMap::new(),
+                )
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
         }
     }
 
     // Add inheritance relationships
     for inheritance in &ir.inheritance {
-        if let (Some(&child_id), Some(&parent_id)) =
-            (node_map.get(&inheritance.child), node_map.get(&inheritance.parent))
-        {
+        if let (Some(&child_id), Some(&parent_id)) = (
+            node_map.get(&inheritance.child),
+            node_map.get(&inheritance.parent),
+        ) {
             graph
                 .add_edge(child_id, parent_id, EdgeType::Extends, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
@@ -371,7 +377,10 @@ mod tests {
     #[test]
     fn test_ir_to_graph_with_imports() {
         let mut ir = CodeIR::new(std::path::PathBuf::from("test.rs"));
-        ir.add_import(codegraph_parser_api::ImportRelation::new("test", "std::collections"));
+        ir.add_import(codegraph_parser_api::ImportRelation::new(
+            "test",
+            "std::collections",
+        ));
         ir.add_import(codegraph_parser_api::ImportRelation::new("test", "std::io"));
 
         let mut graph = CodeGraph::in_memory().unwrap();
@@ -416,7 +425,10 @@ mod tests {
 
         // Verify the function has is_async property
         let func_node = graph.get_node(file_info.functions[0]).unwrap();
-        assert_eq!(func_node.properties.get("is_async"), Some(&codegraph::PropertyValue::Bool(true)));
+        assert_eq!(
+            func_node.properties.get("is_async"),
+            Some(&codegraph::PropertyValue::Bool(true))
+        );
     }
 
     #[test]
@@ -436,8 +448,14 @@ mod tests {
 
         // Verify function properties are set
         let func_node = graph.get_node(file_info.functions[0]).unwrap();
-        assert_eq!(func_node.properties.get("name"), Some(&codegraph::PropertyValue::String("public_fn".to_string())));
-        assert_eq!(func_node.properties.get("visibility"), Some(&codegraph::PropertyValue::String("public".to_string())));
+        assert_eq!(
+            func_node.properties.get("name"),
+            Some(&codegraph::PropertyValue::String("public_fn".to_string()))
+        );
+        assert_eq!(
+            func_node.properties.get("visibility"),
+            Some(&codegraph::PropertyValue::String("public".to_string()))
+        );
     }
 
     #[test]
@@ -448,7 +466,9 @@ mod tests {
         let mut class = codegraph_parser_api::ClassEntity::new("Item", 5, 10);
         class.implemented_traits.push("Display".to_string());
         ir.add_class(class);
-        ir.add_implementation(codegraph_parser_api::ImplementationRelation::new("Item", "Display"));
+        ir.add_implementation(codegraph_parser_api::ImplementationRelation::new(
+            "Item", "Display",
+        ));
 
         let mut graph = CodeGraph::in_memory().unwrap();
         let result = ir_to_graph(&ir, &mut graph, Path::new("test.rs"));
