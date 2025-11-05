@@ -12,9 +12,22 @@ pub fn extract(
     file_path: &Path,
     config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
-    // Create tree-sitter parser
+    // Create tree-sitter parser with appropriate language variant
     let mut parser = Parser::new();
-    let language = tree_sitter_typescript::language_typescript();
+
+    // Detect if file is JSX/TSX based on extension
+    let is_jsx = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "tsx" || e == "jsx")
+        .unwrap_or(false);
+
+    let language = if is_jsx {
+        tree_sitter_typescript::language_tsx()
+    } else {
+        tree_sitter_typescript::language_typescript()
+    };
+
     parser
         .set_language(language)
         .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
@@ -268,5 +281,117 @@ function test() {
         assert_eq!(module.name, "module");
         assert_eq!(module.language, "typescript");
         assert!(module.line_count > 0);
+    }
+
+    #[test]
+    fn test_extract_jsx_component() {
+        let source = r#"
+import React from 'react';
+
+function Welcome(props) {
+    return <h1>Hello, {props.name}</h1>;
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Welcome.jsx"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.functions[0].name, "Welcome");
+        assert_eq!(ir.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_tsx_component() {
+        let source = r#"
+import React from 'react';
+
+interface Props {
+    name: string;
+}
+
+function Greeting(props: Props) {
+    return <h1>Hello, {props.name}!</h1>;
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Greeting.tsx"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.functions[0].name, "Greeting");
+        assert_eq!(ir.traits.len(), 1);
+        assert_eq!(ir.traits[0].name, "Props");
+        assert_eq!(ir.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_tsx_class_component() {
+        let source = r#"
+import React, { Component } from 'react';
+
+class Counter extends Component {
+    render() {
+        return <button onClick={this.handleClick}>Count</button>;
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Counter.tsx"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "Counter");
+        assert!(ir.functions.len() >= 1); // render method
+        assert_eq!(ir.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_jsx_with_fragments() {
+        let source = r#"
+function List() {
+    return (
+        <>
+            <li>Item 1</li>
+            <li>Item 2</li>
+        </>
+    );
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("List.jsx"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.functions[0].name, "List");
+    }
+
+    #[test]
+    fn test_extract_tsx_with_hooks() {
+        let source = r#"
+import { useState, useEffect } from 'react';
+
+function Counter() {
+    const [count, setCount] = useState(0);
+
+    useEffect(() => {
+        document.title = `Count: ${count}`;
+    }, [count]);
+
+    return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Counter.tsx"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 1);
+        assert_eq!(ir.functions[0].name, "Counter");
+        assert_eq!(ir.imports.len(), 1);
     }
 }

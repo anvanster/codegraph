@@ -19,7 +19,7 @@ pub fn ir_to_graph(
     let mut function_ids = Vec::new();
     let mut class_ids = Vec::new();
     let mut trait_ids = Vec::new();
-    let import_ids = Vec::new();
+    let mut import_ids = Vec::new();
 
     // Create module/file node
     let file_id = if let Some(ref module) = ir.module {
@@ -169,11 +169,48 @@ pub fn ir_to_graph(
         }
     }
 
-    // Add import relationships
-    // Note: Imports are represented as edges, not nodes, in the current API
-    // The import_ids vector is kept for API compatibility but remains empty
-    let _ = &ir.imports; // Suppress unused warning for now
-    // TODO: Create proper import edges when target modules are known
+    // Add import nodes and relationships
+    for import in &ir.imports {
+        let imported_module = &import.imported;
+
+        // Create or get module node
+        let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
+            existing_id
+        } else {
+            // Determine if this is an external or internal module
+            let is_external = !imported_module.starts_with("super::")
+                && !imported_module.starts_with("crate::")
+                && !imported_module.starts_with("self::");
+
+            let props = PropertyMap::new()
+                .with("name", imported_module.clone())
+                .with("is_external", is_external.to_string());
+
+            let id = graph
+                .add_node(NodeType::Module, props)
+                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+            node_map.insert(imported_module.clone(), id);
+            id
+        };
+
+        import_ids.push(import_id);
+
+        // Create import edge from file to module
+        let mut edge_props = PropertyMap::new();
+        if let Some(ref alias) = import.alias {
+            edge_props = edge_props.with("alias", alias.clone());
+        }
+        if import.is_wildcard {
+            edge_props = edge_props.with("is_wildcard", "true");
+        }
+        if !import.symbols.is_empty() {
+            edge_props = edge_props.with("symbols", import.symbols.join(","));
+        }
+
+        graph
+            .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
+            .map_err(|e| ParserError::GraphError(e.to_string()))?;
+    }
 
     // Add call relationships
     for call in &ir.calls {

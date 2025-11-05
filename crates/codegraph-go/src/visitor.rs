@@ -139,13 +139,92 @@ impl<'a> GoVisitor<'a> {
     }
 
     fn visit_import(&mut self, node: Node) {
-        let import_text = self.node_text(node);
+        // Check if this is an import block or single import
+        let mut cursor = node.walk();
+        let mut found_specs = false;
+
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "import_spec_list" => {
+                    // Import block: import ( ... )
+                    found_specs = true;
+                    let mut spec_cursor = child.walk();
+                    for spec in child.children(&mut spec_cursor) {
+                        if spec.kind() == "import_spec" {
+                            self.extract_import_spec(spec);
+                        }
+                    }
+                }
+                "import_spec" => {
+                    // Single import: import "fmt" or import f "fmt"
+                    found_specs = true;
+                    self.extract_import_spec(child);
+                }
+                _ => {}
+            }
+        }
+
+        // Fallback for unexpected format
+        if !found_specs {
+            let import_text = self.node_text(node);
+            let import = ImportRelation {
+                importer: "current_package".to_string(),
+                imported: import_text,
+                symbols: Vec::new(),
+                is_wildcard: false,
+                alias: None,
+            };
+            self.imports.push(import);
+        }
+    }
+
+    fn extract_import_spec(&mut self, node: Node) {
+        let mut alias = None;
+        let mut is_wildcard = false;
+        let mut path = String::new();
+
+        // Extract path and optional name (alias)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let kind = child.kind();
+            let text = self.node_text(child);
+
+            match kind {
+                "interpreted_string_literal" => {
+                    // This is the import path
+                    // Remove quotes
+                    path = text.trim_matches('"').to_string();
+                }
+                "package_identifier" | "identifier" | "dot" | "." => {
+                    // This is the alias/name or special marker
+                    if text == "." {
+                        is_wildcard = true;
+                    } else if text != "_" {
+                        alias = Some(text);
+                    }
+                    // If it's "_", we ignore it (blank identifier)
+                }
+                _ => {
+                    // Check text content for special cases
+                    if text == "." {
+                        is_wildcard = true;
+                    } else if text != "_" && !text.trim().is_empty() && kind != "(" && kind != ")" && kind != "\"" {
+                        // Might be an unrecognized alias format
+                        if !path.is_empty() {
+                            // Only set alias if we haven't found the path yet would mean this comes before
+                            // Actually in Go, alias comes before path
+                        }
+                    }
+                }
+            }
+        }
+
         let import = ImportRelation {
             importer: "current_package".to_string(),
-            imported: import_text,
-            symbols: Vec::new(),
-            is_wildcard: false,
-            alias: None,
+            imported: path,
+            symbols: Vec::new(), // Go doesn't have named imports like TypeScript
+            is_wildcard,
+            alias,
         };
         self.imports.push(import);
     }
@@ -258,5 +337,109 @@ mod tests {
         assert_eq!(visitor.structs.len(), 2);
         assert_eq!(visitor.structs[0].name, "User");
         assert_eq!(visitor.structs[1].name, "Admin");
+    }
+
+    // TDD: New tests for individual import extraction
+    #[test]
+    fn test_visitor_import_block_multiple_imports() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"io\"\n)";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        // Should extract 3 individual imports, not 1 block
+        assert_eq!(visitor.imports.len(), 3, "Should extract 3 individual imports");
+        assert_eq!(visitor.imports[0].imported, "fmt");
+        assert_eq!(visitor.imports[1].imported, "os");
+        assert_eq!(visitor.imports[2].imported, "io");
+    }
+
+    #[test]
+    fn test_visitor_import_with_alias() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nimport f \"fmt\"";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "fmt");
+        assert_eq!(visitor.imports[0].alias, Some("f".to_string()));
+        assert_eq!(visitor.imports[0].is_wildcard, false);
+    }
+
+    #[test]
+    fn test_visitor_import_with_dot_wildcard() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nimport . \"fmt\"";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "fmt");
+        assert_eq!(visitor.imports[0].is_wildcard, true);
+        assert_eq!(visitor.imports[0].alias, None);
+    }
+
+    #[test]
+    fn test_visitor_import_with_blank_identifier() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nimport _ \"database/sql\"";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "database/sql");
+        assert_eq!(visitor.imports[0].alias, None); // _ is ignored
+        assert_eq!(visitor.imports[0].is_wildcard, false);
+    }
+
+    #[test]
+    fn test_visitor_import_block_with_aliases() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nimport (\n\tf \"fmt\"\n\t. \"os\"\n\t_ \"encoding/json\"\n)";
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.imports.len(), 3);
+
+        // Import with alias
+        assert_eq!(visitor.imports[0].imported, "fmt");
+        assert_eq!(visitor.imports[0].alias, Some("f".to_string()));
+        assert_eq!(visitor.imports[0].is_wildcard, false);
+
+        // Import with dot (wildcard)
+        assert_eq!(visitor.imports[1].imported, "os");
+        assert_eq!(visitor.imports[1].is_wildcard, true);
+        assert_eq!(visitor.imports[1].alias, None);
+
+        // Import with blank identifier
+        assert_eq!(visitor.imports[2].imported, "encoding/json");
+        assert_eq!(visitor.imports[2].alias, None);
+        assert_eq!(visitor.imports[2].is_wildcard, false);
     }
 }

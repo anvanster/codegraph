@@ -151,6 +151,10 @@ pub trait CodeParser: Send + Sync {
 
     /// Parse a single file and insert entities/relationships into the graph
     ///
+    /// **Note on Metrics**: This method updates parser metrics
+    /// (files_attempted, files_succeeded, etc.). Use `metrics()` to retrieve
+    /// statistics after parsing operations.
+    ///
     /// # Arguments
     /// * `path` - Path to the source file
     /// * `graph` - Mutable reference to the CodeGraph database
@@ -172,6 +176,11 @@ pub trait CodeParser: Send + Sync {
     /// Parse source code string and insert into graph
     ///
     /// Useful for parsing code snippets or in-memory source.
+    ///
+    /// **Note on Metrics**: This method does NOT update parser metrics
+    /// (files_attempted, files_succeeded, etc.). Only `parse_file()` updates
+    /// metrics to avoid double-counting when `parse_source()` is called
+    /// internally by `parse_file()`.
     ///
     /// # Arguments
     /// * `source` - Source code string
