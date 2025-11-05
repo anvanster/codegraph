@@ -5,6 +5,9 @@ members = [
     "crates/codegraph",
     "crates/codegraph-parser-api",
     "crates/codegraph-python",
+    "crates/codegraph-rust",
+    "crates/codegraph-typescript",
+    "crates/codegraph-go",
 ]
 
 [workspace.package]
