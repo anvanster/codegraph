@@ -1,6 +1,7 @@
-// Benchmarks will be implemented in Phase 8 (Polish)
+// Python parser performance benchmarks
 use codegraph::CodeGraph;
-use codegraph_python::{Parser, ParserConfig};
+use codegraph_parser_api::{CodeParser, ParserConfig};
+use codegraph_python::PythonParser;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::path::Path;
 
@@ -10,7 +11,7 @@ fn bench_parse_single_file(c: &mut Criterion) {
     group.bench_function("simple.py", |b| {
         b.iter(|| {
             let mut graph = CodeGraph::in_memory().unwrap();
-            let parser = Parser::new();
+            let parser = PythonParser::new();
             let path = Path::new("tests/fixtures/simple.py");
             parser.parse_file(black_box(path), &mut graph).unwrap();
         });
@@ -26,11 +27,7 @@ fn bench_parse_project(c: &mut Criterion) {
     group.bench_function("sequential", |b| {
         b.iter(|| {
             let mut graph = CodeGraph::in_memory().unwrap();
-            let config = ParserConfig {
-                parallel: false,
-                ..Default::default()
-            };
-            let parser = Parser::with_config(config);
+            let parser = PythonParser::new();
             let path = Path::new("tests/fixtures/test_project");
             parser.parse_directory(black_box(path), &mut graph).unwrap();
         });
@@ -42,10 +39,10 @@ fn bench_parse_project(c: &mut Criterion) {
             let mut graph = CodeGraph::in_memory().unwrap();
             let config = ParserConfig {
                 parallel: true,
-                num_threads: Some(2),
+                parallel_workers: Some(2),
                 ..Default::default()
             };
-            let parser = Parser::with_config(config);
+            let parser = PythonParser::with_config(config);
             let path = Path::new("tests/fixtures/test_project");
             parser.parse_directory(black_box(path), &mut graph).unwrap();
         });
@@ -57,10 +54,10 @@ fn bench_parse_project(c: &mut Criterion) {
             let mut graph = CodeGraph::in_memory().unwrap();
             let config = ParserConfig {
                 parallel: true,
-                num_threads: Some(4),
+                parallel_workers: Some(4),
                 ..Default::default()
             };
-            let parser = Parser::with_config(config);
+            let parser = PythonParser::with_config(config);
             let path = Path::new("tests/fixtures/test_project");
             parser.parse_directory(black_box(path), &mut graph).unwrap();
         });

@@ -20,10 +20,16 @@ thiserror.workspace = true
 syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
 quote = "1.0"
 proc-macro2 = "1.0"
+rayon = "1.10"
 
 [dev-dependencies]
 serde_json.workspace = true
 tempfile = "3.0"
+criterion = "0.5"
+
+[[bench]]
+name = "parsing"
+harness = false
 
 [lib]
 name = "codegraph_rust"

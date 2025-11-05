@@ -222,6 +222,8 @@ version = "0.1.0"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
+ "criterion",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",
@@ -264,8 +266,10 @@ version = "0.1.0"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
+ "criterion",
  "proc-macro2",
  "quote",
+ "rayon",
  "serde",
  "serde_json",
  "syn",
@@ -279,6 +283,8 @@ version = "0.1.0"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
+ "criterion",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",

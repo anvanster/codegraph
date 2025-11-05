@@ -19,10 +19,16 @@ thiserror.workspace = true
 # Go parser
 tree-sitter = "0.20"
 tree-sitter-go = "0.20"
+rayon = "1.10"
 
 [dev-dependencies]
 serde_json.workspace = true
 tempfile = "3.0"
+criterion = "0.5"
+
+[[bench]]
+name = "parsing"
+harness = false
 
 [lib]
 name = "codegraph_go"
