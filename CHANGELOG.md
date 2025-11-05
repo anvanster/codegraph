@@ -5,6 +5,106 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - v0.2.0
+
+### Added
+
+#### Monorepo Architecture
+- Migrated to workspace structure with 6 crates
+- Unified build system with shared dependencies
+- Workspace-level configuration and metadata
+- 421+ tests across all crates
+
+#### Parser API (`codegraph-parser-api` v0.1.0)
+- `CodeParser` trait defining standard parser interface
+- Unified entity types: `FunctionEntity`, `ClassEntity`, `ModuleEntity`, `TraitEntity`
+- Unified relationship types: `CallRelation`, `ImportRelation`, `InheritanceRelation`, `ImplementationRelation`
+- `ParserConfig` with resource limits and feature flags
+- `ParserMetrics` for tracking parse performance
+- `CodeIR` intermediate representation for language-agnostic parsing
+- Builder patterns for ergonomic entity construction
+- Thread-safe design (Send + Sync)
+- Comprehensive documentation and examples
+
+#### Python Parser (`codegraph-python` v0.2.0)
+- Complete migration to `CodeParser` trait
+- 111 tests with ~90% test coverage
+- Config-based filtering (include_tests, include_private)
+- Comprehensive entity extraction (functions, classes, methods, imports)
+- Async function support
+- Property and decorator tracking
+- Backward compatibility with deprecated API
+
+#### Rust Parser (`codegraph-rust` v0.1.0)
+- Full implementation of `CodeParser` trait
+- 64 tests (40 unit + 24 integration)
+- Extract functions, structs, enums, traits, impl blocks
+- Individual use statement parsing with full paths
+- Support for simple, aliased, grouped, glob, and nested imports
+- Visibility tracking (public, private, crate, pub(crate))
+- Generic and lifetime parameter extraction
+- Method extraction from impl blocks
+
+#### TypeScript Parser (`codegraph-typescript` v0.1.0)
+- Full implementation of `CodeParser` trait
+- 63 tests (40 unit + 23 integration)
+- Support for .ts, .tsx, .js, .jsx files
+- JSX/TSX support with file extension detection
+- Extract functions, classes, interfaces, methods
+- Individual import symbol extraction (named, default, namespace)
+- Class method extraction with parameters
+- Export tracking (default and named exports)
+- Async/await function detection
+
+#### Go Parser (`codegraph-go` v0.1.0)
+- Full implementation of `CodeParser` trait
+- 54 tests (34 unit + 20 integration)
+- Extract functions, structs, interfaces, methods
+- Individual import extraction from import blocks
+- Support for named imports, dot imports, and aliased imports
+- Method receiver tracking
+- Pointer receiver detection
+- Exported/unexported entity tracking
+
+### Changed
+
+#### codegraph-python Breaking Changes
+- **BREAKING**: `Parser` struct deprecated in favor of `PythonParser`
+- **BREAKING**: Entity types now come from `codegraph-parser-api`
+- **BREAKING**: Config fields renamed (`skip_tests` → `include_tests`, `skip_private` → `include_private`)
+- Migration path: Use `PythonParser::new()` instead of `Parser::new()`
+- Old API still available with deprecation warnings
+
+#### Test Coverage
+- Workspace total: 421+ tests (from 115)
+- codegraph: 39 tests (unchanged, 85% coverage)
+- parser-api: 12 tests
+- Python: 111 tests (~90% coverage)
+- Rust: 64 tests
+- TypeScript: 63 tests
+- Go: 54 tests
+
+#### Documentation
+- Added workspace README with all parsers
+- Updated ARCHITECTURE.md with completed phases
+- Updated MIGRATION_GUIDE.md with completion status
+- Added parser-specific usage examples
+- Comprehensive API documentation for all parsers
+
+### Fixed
+- All clippy warnings across workspace resolved
+- Formatting consistency with `cargo fmt`
+- Python parser now respects ParserConfig filtering
+- Import extraction provides symbol-level granularity (all parsers)
+- TypeScript method extraction from classes
+- Edge cases in deeply nested code structures
+
+### Performance
+- Parser metrics tracked across all implementations
+- Parallel parsing support in ParserConfig
+- Efficient AST traversal in all parsers
+- Minimal allocations during parsing
+
 ## [0.1.1] - 2025-11-02
 
 ### Added

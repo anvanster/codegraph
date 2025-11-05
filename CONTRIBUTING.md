@@ -22,8 +22,31 @@ Before contributing, please read our [Constitution](.github/prompts/speckit.cons
 ```bash
 git clone https://github.com/anvanster/codegraph.git
 cd codegraph
-cargo build
-cargo test
+
+# Build entire workspace
+cargo build --workspace
+
+# Test entire workspace (421+ tests)
+cargo test --workspace
+
+# Build specific crate
+cargo build -p codegraph-python
+cargo test -p codegraph-rust
+```
+
+### Workspace Structure
+
+```
+codegraph/
+├── crates/
+│   ├── codegraph/              # Graph database core
+│   ├── codegraph-parser-api/   # Parser trait and types
+│   ├── codegraph-python/       # Python parser
+│   ├── codegraph-rust/         # Rust parser
+│   ├── codegraph-typescript/   # TypeScript/JavaScript parser
+│   └── codegraph-go/           # Go parser
+├── Cargo.toml                  # Workspace root
+└── docs/                       # Documentation
 ```
 
 ## Contribution Process
@@ -43,17 +66,20 @@ All code MUST be developed using TDD methodology:
 Before submitting:
 
 ```bash
-# Format code
-cargo fmt
+# Format code (workspace-wide)
+cargo fmt --all
 
-# Lint with clippy
-cargo clippy -- -D warnings
+# Lint with clippy (workspace-wide)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Run all tests
-cargo test
+# Run all tests (workspace-wide)
+cargo test --workspace
+
+# Test specific crate
+cargo test -p codegraph-python
 
 # Check documentation
-cargo doc --no-deps
+cargo doc --workspace --no-deps
 ```
 
 All checks must pass.
@@ -131,6 +157,110 @@ Open an issue with:
 - Alternative approaches considered
 
 For major features, an RFC may be required.
+
+### Adding a New Language Parser
+
+We welcome new language parsers! Follow this guide:
+
+#### 1. Create Parser Crate
+
+```bash
+cd crates
+cargo new codegraph-<language> --lib
+```
+
+#### 2. Set Up Dependencies
+
+Update `Cargo.toml`:
+
+```toml
+[package]
+name = "codegraph-<language>"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+codegraph-parser-api = { workspace = true }
+codegraph = { workspace = true }
+# Add language-specific parser (tree-sitter, syn, etc.)
+```
+
+#### 3. Implement CodeParser Trait
+
+Create `src/parser_impl.rs`:
+
+```rust
+use codegraph::CodeGraph;
+use codegraph_parser_api::{CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics};
+use std::path::Path;
+
+pub struct YourLanguageParser {
+    config: ParserConfig,
+    metrics: Mutex<ParserMetrics>,
+}
+
+impl CodeParser for YourLanguageParser {
+    fn language(&self) -> &str {
+        "your-language"
+    }
+
+    fn file_extensions(&self) -> &[&str] {
+        &[".ext"]
+    }
+
+    fn parse_source(&self, source: &str, file_path: &Path, graph: &mut CodeGraph)
+        -> Result<FileInfo, ParserError> {
+        // Implementation
+    }
+
+    // ... other trait methods
+}
+```
+
+#### 4. Extract Entities
+
+Create `src/visitor.rs` and `src/extractor.rs` to:
+- Parse source code using language-specific parser
+- Extract functions, classes, modules, etc.
+- Extract imports and relationships
+- Convert to CodeIR format
+
+#### 5. Write Tests (TDD)
+
+Add comprehensive tests in `tests/`:
+- `unit_tests.rs` - Test visitor and extractor logic
+- `integration_tests.rs` - End-to-end parsing tests
+- `parser_impl_tests.rs` - CodeParser trait tests
+
+Aim for 60+ tests with >85% coverage.
+
+#### 6. Documentation
+
+- Add README with usage examples
+- Document language-specific features
+- Add to workspace README
+
+#### 7. Integration
+
+Update workspace `Cargo.toml`:
+
+```toml
+[workspace]
+members = [
+    # ...existing crates
+    "crates/codegraph-<language>",
+]
+```
+
+#### Example Parsers
+
+See existing implementations for reference:
+- `codegraph-python` - Uses rustpython-parser
+- `codegraph-rust` - Uses syn
+- `codegraph-typescript` - Uses tree-sitter-typescript
+- `codegraph-go` - Uses tree-sitter-go
 
 ### Code Contributions
 

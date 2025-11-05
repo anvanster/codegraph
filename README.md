@@ -1,21 +1,155 @@
-# codegraph
+# codegraph Workspace
 
 [![Crates.io](https://img.shields.io/crates/v/codegraph.svg)](https://crates.io/crates/codegraph)
 [![Documentation](https://docs.rs/codegraph/badge.svg)](https://docs.rs/codegraph)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/anvanster/codegraph/workflows/CI/badge.svg)](https://github.com/anvanster/codegraph/actions)
 
-A fast, reliable, and flexible graph database optimized for storing and querying code relationships.
+A fast, reliable, and flexible graph database optimized for storing and querying code relationships, with production-ready language parsers.
 
 ## Mission
 
-codegraph provides a fast, reliable, and flexible graph database optimized for storing and querying code relationships, enabling tool builders to focus on analysis logic rather than infrastructure.
+The codegraph ecosystem provides:
+- **codegraph**: Fast graph database for storing code relationships
+- **codegraph-parser-api**: Unified parser interface and types
+- **Language parsers**: Production-ready parsers for Python, Rust, TypeScript, and Go
+- A complete solution for building code analysis tools
+
+## Workspace Crates
+
+| Crate | Version | Description | Status |
+|-------|---------|-------------|--------|
+| [`codegraph`](crates/codegraph) | 0.1.1 | Graph database core | ✅ Stable |
+| [`codegraph-parser-api`](crates/codegraph-parser-api) | 0.1.0 | Parser trait and types | ✅ Stable |
+| [`codegraph-python`](crates/codegraph-python) | 0.2.0 | Python parser | ✅ Stable |
+| [`codegraph-rust`](crates/codegraph-rust) | 0.1.0 | Rust parser | ✅ Stable |
+| [`codegraph-typescript`](crates/codegraph-typescript) | 0.1.0 | TypeScript/JavaScript parser | ✅ Stable |
+| [`codegraph-go`](crates/codegraph-go) | 0.1.0 | Go parser | ✅ Stable |
+
+## Quick Start
+
+### Using the Complete Solution (Database + Parser)
+
+```toml
+[dependencies]
+codegraph = "0.1.1"
+codegraph-parser-api = "0.1.0"
+codegraph-python = "0.2.0"  # or rust, typescript, go
+```
+
+```rust
+use codegraph::CodeGraph;
+use codegraph_parser_api::CodeParser;
+use codegraph_python::PythonParser;
+use std::path::Path;
+
+// Create parser and graph
+let parser = PythonParser::new();
+let mut graph = CodeGraph::open("./my_project.graph")?;
+
+// Parse a file
+let file_info = parser.parse_file(Path::new("main.py"), &mut graph)?;
+println!("Parsed: {} functions, {} classes",
+    file_info.functions.len(),
+    file_info.classes.len()
+);
+
+// Parse entire project
+let project_info = parser.parse_directory(Path::new("./src"), &mut graph)?;
+println!("Parsed {} files in {:?}",
+    project_info.files.len(),
+    project_info.total_parse_time
+);
+
+// Query the graph
+let neighbors = graph.get_neighbors(&file_info.file_id)?;
+```
+
+### Language-Specific Examples
+
+<details>
+<summary><b>Python Parser</b></summary>
+
+```rust
+use codegraph_python::PythonParser;
+use codegraph_parser_api::{CodeParser, ParserConfig};
+
+let config = ParserConfig {
+    include_tests: false,      // Skip test_ functions
+    include_private: false,     // Skip _private functions
+    parallel: true,             // Use parallel parsing
+    ..Default::default()
+};
+
+let parser = PythonParser::with_config(config);
+let mut graph = CodeGraph::open("project.graph")?;
+
+// Parse Python project
+let info = parser.parse_directory(Path::new("./src"), &mut graph)?;
+```
+</details>
+
+<details>
+<summary><b>Rust Parser</b></summary>
+
+```rust
+use codegraph_rust::RustParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = RustParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+// Parse Rust source
+let info = parser.parse_file(Path::new("main.rs"), &mut graph)?;
+
+// Extracts: functions, structs, enums, traits, impl blocks, use statements
+```
+</details>
+
+<details>
+<summary><b>TypeScript Parser</b></summary>
+
+```rust
+use codegraph_typescript::TypeScriptParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = TypeScriptParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+// Supports .ts, .tsx, .js, .jsx files
+let info = parser.parse_file(Path::new("App.tsx"), &mut graph)?;
+
+// Extracts: functions, classes, interfaces, imports, JSX components
+```
+</details>
+
+<details>
+<summary><b>Go Parser</b></summary>
+
+```rust
+use codegraph_go::GoParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = GoParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+// Parse Go package
+let info = parser.parse_directory(Path::new("./pkg"), &mut graph)?;
+
+// Extracts: functions, structs, interfaces, imports
+```
+</details>
 
 ## Core Principles
 
-### 🔌 Parser Agnostic
-**"Bring your own parser, we'll handle the graph."**
+### 🔌 Unified Parser API
+**"One trait to parse them all."**
 
-codegraph does NOT include built-in language parsers. You integrate your own parsers (tree-sitter, syn, swc, etc.), and we provide the storage and query infrastructure.
+All language parsers implement the same `CodeParser` trait, providing:
+- Consistent API across languages
+- Standardized entity types (functions, classes, imports)
+- Uniform error handling and metrics
+- Drop-in interchangeability
 
 ### ⚡ Performance First
 **"Sub-100ms queries or it didn't happen."**
@@ -28,10 +162,14 @@ codegraph does NOT include built-in language parsers. You integrate your own par
 ### 🧪 Test-Driven Development
 **"If it's not tested, it's broken."**
 
-- 115 tests with comprehensive coverage (39 lib + 70 integration/unit + 6 doctests)
-- Every public API is tested
-- Benchmarks ensure performance targets
-- 85% test coverage (983/1158 lines)
+- 421+ tests across entire workspace
+- codegraph: 39 tests (85% coverage)
+- parser-api: 12 tests with comprehensive entity validation
+- Python: 111 tests (~90% coverage)
+- Rust: 64 tests (40 unit + 24 integration)
+- TypeScript: 63 tests (40 unit + 23 integration)
+- Go: 54 tests (34 unit + 20 integration)
+- Every public API tested with TDD methodology
 
 ### 🪄 Zero Magic
 **"Explicit over implicit, always."**
@@ -50,16 +188,14 @@ codegraph does NOT include built-in language parsers. You integrate your own par
 - Atomic batch operations
 - Memory backend for testing only
 
-## Quick Start
+## Using Just the Database
 
-Add to your `Cargo.toml`:
+If you want to use your own parsers:
 
 ```toml
 [dependencies]
 codegraph = "0.1.1"
 ```
-
-### Basic Usage
 
 ```rust
 use codegraph::{CodeGraph, Node, NodeType, Edge, EdgeType};
@@ -68,44 +204,15 @@ use std::path::Path;
 // Create a persistent graph
 let mut graph = CodeGraph::open(Path::new("./my_project.graph"))?;
 
-// Add a file node (explicit, no magic)
+// Add nodes manually
 let file_id = graph.add_file(Path::new("src/main.rs"), "rust")?;
+let func_id = graph.add_node(NodeType::Function, properties)?;
 
-// Add a function node
-let mut func_node = Node::new(NodeType::Function);
-func_node.set_property("name", serde_json::json!("main"));
-func_node.set_property("line", serde_json::json!(10));
-let func_id = graph.add_node(func_node)?;
-
-// Create a relationship (file contains function)
-let edge = Edge::new(file_id, func_id, EdgeType::Contains);
-graph.add_edge(edge)?;
+// Create relationships
+graph.add_edge(file_id, func_id, EdgeType::Contains, properties)?;
 
 // Query the graph
 let neighbors = graph.get_neighbors(&file_id)?;
-println!("File contains {} entities", neighbors.len());
-```
-
-### Parser Integration Example
-
-```rust
-// Example with tree-sitter (you provide the parser)
-use tree_sitter::{Parser, Language};
-
-extern "C" { fn tree_sitter_rust() -> Language; }
-
-let mut parser = Parser::new();
-parser.set_language(unsafe { tree_sitter_rust() }).unwrap();
-
-let source_code = std::fs::read_to_string("src/main.rs")?;
-let tree = parser.parse(&source_code, None).unwrap();
-
-// You extract entities from the AST
-// codegraph stores the relationships
-let mut graph = CodeGraph::open("./project.graph")?;
-let file_id = graph.add_file("src/main.rs", "rust")?;
-
-// Walk the tree and add nodes/edges as you see fit
 ```
 
 ## Architecture
@@ -140,19 +247,19 @@ Each layer:
 - **Comprehensive Tests**: 85% test coverage (983/1158 lines)
 - **Zero Unsafe Code**: Memory-safe by default
 
-## What We Are (and Aren't)
+## What We Provide
 
-### We Are ✅
-- A graph database optimized for code relationships
-- A storage layer for tool builders
-- Language-agnostic
-- Production-ready
+### ✅ Complete Solution
+- **Graph Database**: Fast, persistent storage for code relationships
+- **Parser API**: Unified interface for all language parsers
+- **Language Parsers**: Production-ready Python, Rust, TypeScript, and Go parsers
+- **Analysis Foundation**: Building blocks for custom code analysis tools
 
-### We Are Not ❌
-- A parser (no AST extraction)
-- A semantic analyzer (no type inference)
-- An IDE integration (no LSP server)
-- A complete framework (you build the analysis logic)
+### ❌ Out of Scope
+- **Semantic Analysis**: No type inference or advanced static analysis
+- **IDE Integration**: No LSP server or editor plugins
+- **Build System**: No compilation or dependency resolution
+- **Complete Framework**: You build the analysis logic, we provide the infrastructure
 
 ## Performance Targets
 
@@ -166,38 +273,51 @@ Each layer:
 
 ## Development
 
-### Build
+### Workspace Commands
 
 ```bash
-cargo build --release
-```
+# Build all crates
+cargo build --workspace --release
 
-### Test
+# Test all crates (421+ tests)
+cargo test --workspace
 
-```bash
-cargo test
-```
+# Test specific parser
+cargo test -p codegraph-python
+cargo test -p codegraph-rust
 
-### Documentation
-
-```bash
-cargo doc --open
+# Generate documentation for all crates
+cargo doc --workspace --open
 ```
 
 ### Code Quality
 
 ```bash
-# Format code
-cargo fmt
+# Format all code
+cargo fmt --all
 
-# Lint with clippy
-cargo clippy -- -D warnings
+# Lint with clippy (all warnings as errors)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Check test coverage
-cargo tarpaulin
+cargo tarpaulin --workspace --exclude-files "tests/*"
 
-# Run all CI checks locally (recommended before pushing)
-./scripts/ci-checks.sh
+# Run individual crate checks
+cargo clippy -p codegraph-go --all-targets --all-features -- -D warnings
+```
+
+### Individual Crate Development
+
+```bash
+# Work on specific parser
+cd crates/codegraph-typescript
+cargo test
+cargo clippy -- -D warnings
+
+# Add features to parser API
+cd crates/codegraph-parser-api
+cargo test
+cargo doc --open
 ```
 
 ## Examples
@@ -339,23 +459,32 @@ Current version: **0.1.1** (Initial release + formatting fixes)
 
 ## Roadmap
 
-### v0.2-0.5 (Near-term)
-- [ ] Query language improvements
-- [ ] More export formats (GraphML, Cypher)
-- [ ] Performance optimizations
-- [ ] First-party parser helper crates
+### v0.2.0 (Current Release)
+- [x] Unified parser API with standardized types
+- [x] Python parser with comprehensive test coverage
+- [x] Rust parser with full AST extraction
+- [x] TypeScript/JavaScript parser with JSX/TSX support
+- [x] Go parser with import tracking
+- [x] 421+ tests across all crates
+
+### v0.3-0.5 (Near-term)
+- [ ] Query language improvements (graph patterns, filters)
+- [ ] More export formats (GraphML, Cypher, Neo4j)
+- [ ] Performance optimizations (batch operations, caching)
+- [ ] Parser enhancements (semantic relationships, type information)
 
 ### v0.6-0.9 (Medium-term)
-- [ ] Incremental updates
-- [ ] Change tracking
+- [ ] Incremental updates (watch mode, delta parsing)
+- [ ] Change tracking and diff analysis
 - [ ] Statistics and metrics API
-- [ ] CLI tool
+- [ ] CLI tool for parsing and querying
+- [ ] Additional language parsers (Java, C++, C#)
 
 ### v1.0+ (Long-term)
-- [ ] Schema validation
+- [ ] Schema validation and constraints
 - [ ] Full-text search integration
-- [ ] Compression options
-- [ ] Distributed graphs (maybe)
+- [ ] Compression options for large graphs
+- [ ] Distributed graphs for multi-repo analysis
 
 ## Acknowledgments
 
