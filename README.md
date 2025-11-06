@@ -3,7 +3,6 @@
 [![Crates.io](https://img.shields.io/crates/v/codegraph.svg)](https://crates.io/crates/codegraph)
 [![Documentation](https://docs.rs/codegraph/badge.svg)](https://docs.rs/codegraph)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/anvanster/codegraph/workflows/CI/badge.svg)](https://github.com/anvanster/codegraph/actions)
 
 A fast, reliable, and flexible graph database optimized for storing and querying code relationships, with production-ready language parsers.
 
