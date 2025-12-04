@@ -1,7 +1,7 @@
 // Go parser performance benchmarks
 use codegraph::CodeGraph;
-use codegraph_parser_api::CodeParser;
 use codegraph_go::GoParser;
+use codegraph_parser_api::CodeParser;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::path::Path;
 
@@ -29,11 +29,7 @@ func printSum(a, b int) {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = GoParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.go"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.go"), &mut graph)
                 .unwrap();
         });
     });
@@ -68,11 +64,7 @@ func (p Point) String() string {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = GoParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.go"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.go"), &mut graph)
                 .unwrap();
         });
     });
@@ -137,11 +129,7 @@ func (s *InMemoryStorage) Delete(key string) error {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = GoParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.go"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.go"), &mut graph)
                 .unwrap();
         });
     });
@@ -213,11 +201,7 @@ func (s *Server) RegisterHandler(path string, handler http.HandlerFunc) {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = GoParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.go"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.go"), &mut graph)
                 .unwrap();
         });
     });

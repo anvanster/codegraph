@@ -21,11 +21,7 @@ fn multiply(x: i32, y: i32) -> i32 {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = RustParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.rs"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.rs"), &mut graph)
                 .unwrap();
         });
     });
@@ -56,11 +52,7 @@ impl Point {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = RustParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.rs"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.rs"), &mut graph)
                 .unwrap();
         });
     });
@@ -115,11 +107,7 @@ pub async fn fetch_data(storage: Arc<Mutex<dyn Storage>>, key: &str) -> Result<S
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = RustParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.rs"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.rs"), &mut graph)
                 .unwrap();
         });
     });
@@ -140,7 +128,9 @@ fn bench_parse_real_project(c: &mut Criterion) {
                 ..Default::default()
             };
             let parser = RustParser::with_config(config);
-            parser.parse_directory(black_box(crates_path), &mut graph).unwrap();
+            parser
+                .parse_directory(black_box(crates_path), &mut graph)
+                .unwrap();
         });
     });
 
@@ -154,7 +144,9 @@ fn bench_parse_real_project(c: &mut Criterion) {
                 ..Default::default()
             };
             let parser = RustParser::with_config(config);
-            parser.parse_directory(black_box(crates_path), &mut graph).unwrap();
+            parser
+                .parse_directory(black_box(crates_path), &mut graph)
+                .unwrap();
         });
     });
 
@@ -168,7 +160,9 @@ fn bench_parse_real_project(c: &mut Criterion) {
                 ..Default::default()
             };
             let parser = RustParser::with_config(config);
-            parser.parse_directory(black_box(crates_path), &mut graph).unwrap();
+            parser
+                .parse_directory(black_box(crates_path), &mut graph)
+                .unwrap();
         });
     });
 
@@ -182,7 +176,9 @@ fn bench_parse_real_project(c: &mut Criterion) {
                 ..Default::default()
             };
             let parser = RustParser::with_config(config);
-            parser.parse_directory(black_box(crates_path), &mut graph).unwrap();
+            parser
+                .parse_directory(black_box(crates_path), &mut graph)
+                .unwrap();
         });
     });
 

@@ -282,6 +282,23 @@ impl PythonParser {
             }
         }
 
+        // Add implementation relationships (class implements protocol/interface)
+        for impl_rel in &ir.implementations {
+            if let (Some(&implementor_id), Some(&trait_id)) = (
+                node_map.get(&impl_rel.implementor),
+                node_map.get(&impl_rel.trait_name),
+            ) {
+                graph
+                    .add_edge(
+                        implementor_id,
+                        trait_id,
+                        EdgeType::Implements,
+                        PropertyMap::new(),
+                    )
+                    .map_err(|e| ParserError::GraphError(e.to_string()))?;
+            }
+        }
+
         // Count source lines
         let line_count = if let Some(ref module) = ir.module {
             module.line_count
@@ -445,5 +462,49 @@ mod tests {
         assert_eq!(metrics.files_attempted, 0);
         assert_eq!(metrics.files_succeeded, 0);
         assert_eq!(metrics.files_failed, 0);
+    }
+
+    #[test]
+    fn test_implements_edge_creation() {
+        use codegraph::{CodeGraph, EdgeType};
+        use codegraph_parser_api::{
+            ClassEntity, CodeIR, ImplementationRelation, ModuleEntity, TraitEntity,
+        };
+        use std::path::PathBuf;
+
+        let parser = PythonParser::new();
+
+        // Create IR with a class implementing a protocol (Python's equivalent of interface)
+        let mut ir = CodeIR::new(PathBuf::from("test.py"));
+        ir.set_module(ModuleEntity::new("test", "test.py", "python"));
+        ir.add_class(ClassEntity::new("MyClass", 1, 20));
+        ir.add_trait(TraitEntity::new("MyProtocol", 22, 30));
+        ir.add_implementation(ImplementationRelation::new("MyClass", "MyProtocol"));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = parser
+            .ir_to_graph(&ir, &mut graph, Path::new("test.py"))
+            .unwrap();
+
+        assert_eq!(file_info.classes.len(), 1);
+        assert_eq!(file_info.traits.len(), 1);
+
+        // Find class and protocol node IDs
+        let class_id = file_info.classes[0];
+        let protocol_id = file_info.traits[0];
+
+        // Verify implements edge was created
+        let edges = graph.get_edges_between(class_id, protocol_id).unwrap();
+        assert!(
+            !edges.is_empty(),
+            "Should have implements edge between class and protocol"
+        );
+
+        let edge = graph.get_edge(edges[0]).unwrap();
+        assert_eq!(
+            edge.edge_type,
+            EdgeType::Implements,
+            "Edge should be of type Implements"
+        );
     }
 }

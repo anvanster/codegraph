@@ -229,6 +229,23 @@ pub fn ir_to_graph(
         }
     }
 
+    // Add implementation relationships (struct implements interface)
+    for impl_rel in &ir.implementations {
+        if let (Some(&implementor_id), Some(&trait_id)) = (
+            node_map.get(&impl_rel.implementor),
+            node_map.get(&impl_rel.trait_name),
+        ) {
+            graph
+                .add_edge(
+                    implementor_id,
+                    trait_id,
+                    EdgeType::Implements,
+                    PropertyMap::new(),
+                )
+                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+        }
+    }
+
     // Count source lines
     let line_count = if let Some(ref module) = ir.module {
         module.line_count
@@ -380,6 +397,43 @@ mod tests {
         assert_eq!(
             func_node.properties.get("visibility"),
             Some(&codegraph::PropertyValue::String("public".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_ir_to_graph_with_implementation() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::ImplementationRelation;
+
+        let mut ir = CodeIR::new(PathBuf::from("test.go"));
+        ir.add_class(ClassEntity::new("FileReader", 1, 20));
+        ir.add_trait(TraitEntity::new("Reader", 22, 30));
+        ir.add_implementation(ImplementationRelation::new("FileReader", "Reader"));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.go").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        assert_eq!(file_info.classes.len(), 1);
+        assert_eq!(file_info.traits.len(), 1);
+
+        // Find struct and interface node IDs
+        let struct_id = file_info.classes[0];
+        let interface_id = file_info.traits[0];
+
+        // Verify implements edge was created
+        let edges = graph.get_edges_between(struct_id, interface_id).unwrap();
+        assert!(
+            !edges.is_empty(),
+            "Should have implements edge between struct and interface"
+        );
+
+        let edge = graph.get_edge(edges[0]).unwrap();
+        assert_eq!(
+            edge.edge_type,
+            EdgeType::Implements,
+            "Edge should be of type Implements"
         );
     }
 }

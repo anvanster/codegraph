@@ -26,11 +26,7 @@ async function fetchData(url: string): Promise<string> {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = TypeScriptParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.ts"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.ts"), &mut graph)
                 .unwrap();
         });
     });
@@ -68,11 +64,7 @@ export class User {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = TypeScriptParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.ts"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.ts"), &mut graph)
                 .unwrap();
         });
     });
@@ -118,11 +110,7 @@ export const Counter: React.FC<Props> = ({ initialCount, onUpdate }) => {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = TypeScriptParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.tsx"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.tsx"), &mut graph)
                 .unwrap();
         });
     });
@@ -169,11 +157,7 @@ export function createRepository<T>(connection: Connection): Repository<T> {
             let mut graph = CodeGraph::in_memory().unwrap();
             let parser = TypeScriptParser::new();
             parser
-                .parse_source(
-                    black_box(source),
-                    Path::new("benchmark.ts"),
-                    &mut graph,
-                )
+                .parse_source(black_box(source), Path::new("benchmark.ts"), &mut graph)
                 .unwrap();
         });
     });
