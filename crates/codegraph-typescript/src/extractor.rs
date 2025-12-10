@@ -389,7 +389,7 @@ function Counter() {
         assert!(result.is_ok());
         let ir = result.unwrap();
         // Now extracts Counter + 2 arrow functions in hooks
-        assert!(ir.functions.len() >= 1);
+        assert!(!ir.functions.is_empty());
         // Counter should be the first named function
         let counter_fn = ir.functions.iter().find(|f| f.name == "Counter");
         assert!(counter_fn.is_some(), "Counter function should be extracted");

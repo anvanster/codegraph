@@ -81,7 +81,7 @@ pub struct FunctionEntity {
     /// Documentation/docstring
     pub doc_comment: Option<String>,
 
-    /// Decorators/attributes (e.g., [@property], [@deprecated])
+    /// Decorators/attributes (e.g., `@property`, `@deprecated`)
     pub attributes: Vec<String>,
 
     /// Parent class (if this is a method)
