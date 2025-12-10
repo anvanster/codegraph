@@ -19,6 +19,7 @@ pub struct TypeScriptVisitor<'a> {
     pub implementations: Vec<ImplementationRelation>,
     pub inheritance: Vec<InheritanceRelation>,
     current_class: Option<String>,
+    current_function: Option<String>,
 }
 
 impl<'a> TypeScriptVisitor<'a> {
@@ -34,6 +35,7 @@ impl<'a> TypeScriptVisitor<'a> {
             implementations: Vec::new(),
             inheritance: Vec::new(),
             current_class: None,
+            current_function: None,
         }
     }
 
@@ -44,40 +46,40 @@ impl<'a> TypeScriptVisitor<'a> {
 
     /// Visit a tree-sitter node
     pub fn visit_node(&mut self, node: Node) {
-        let handled = match node.kind() {
+        match node.kind() {
             // Only match declaration nodes to avoid duplicates
             "function_declaration" => {
                 self.visit_function(node);
-                true
             }
             "arrow_function" => {
                 self.visit_arrow_function(node);
-                true
             }
             "method_definition" => {
                 self.visit_method(node);
-                true
             }
             "class_declaration" => {
                 self.visit_class(node);
-                true
             }
             "interface_declaration" => {
                 self.visit_interface(node);
-                true
             }
             "import_statement" => {
                 self.visit_import(node);
-                true
             }
-            _ => false,
-        };
-
-        // Only recursively visit children for unhandled node types
-        if !handled {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                self.visit_node(child);
+            "call_expression" => {
+                self.visit_call_expression(node);
+                // Also recurse into call expression children (e.g., nested calls)
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            }
+            _ => {
+                // Recursively visit children for unhandled node types
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
             }
         }
     }
@@ -122,6 +124,20 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        // Set current function context and visit body to extract calls
+        let previous_function = self.current_function.clone();
+        self.current_function = Some(name);
+
+        // Visit function body to extract call expressions
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                self.visit_node(child);
+            }
+        }
+
+        self.current_function = previous_function;
     }
 
     fn visit_arrow_function(&mut self, node: Node) {
@@ -172,7 +188,7 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         let func = FunctionEntity {
-            name,
+            name: name.clone(),
             signature: node_text.lines().next().unwrap_or("").to_string(),
             visibility,
             line_start: node.start_position().row + 1,
@@ -189,6 +205,20 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        // Set current function context and visit body to extract calls
+        let previous_function = self.current_function.clone();
+        self.current_function = Some(name);
+
+        // Visit method body to extract call expressions
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                self.visit_node(child);
+            }
+        }
+
+        self.current_function = previous_function;
     }
 
     fn visit_class(&mut self, node: Node) {
@@ -356,6 +386,78 @@ impl<'a> TypeScriptVisitor<'a> {
         }
 
         parameters
+    }
+
+    /// Visit a call expression and extract the call relationship
+    fn visit_call_expression(&mut self, node: Node) {
+        // Only record calls if we're inside a function/method
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        // Extract the callee name from the call expression
+        // call_expression has a "function" field that is the thing being called
+        if let Some(function_node) = node.child_by_field_name("function") {
+            let callee = self.extract_callee_name(function_node);
+
+            // Skip empty or "this" only callees
+            if callee.is_empty() || callee == "this" {
+                return;
+            }
+
+            let call_site_line = node.start_position().row + 1;
+
+            let call = CallRelation {
+                caller: caller.clone(),
+                callee,
+                call_site_line,
+                is_direct: true,
+            };
+
+            self.calls.push(call);
+        }
+    }
+
+    /// Extract the callee name from a function node in a call expression
+    fn extract_callee_name(&self, node: Node) -> String {
+        match node.kind() {
+            // Simple identifier: foo()
+            "identifier" => self.node_text(node),
+
+            // Member expression: this.foo(), obj.method()
+            "member_expression" => {
+                // Get the property (method name) from member expression
+                if let Some(property) = node.child_by_field_name("property") {
+                    self.node_text(property)
+                } else {
+                    self.node_text(node)
+                }
+            }
+
+            // Optional chaining: this?.foo()
+            "call_expression" => {
+                // Nested call, e.g., getProvider()()
+                if let Some(func) = node.child_by_field_name("function") {
+                    self.extract_callee_name(func)
+                } else {
+                    String::new()
+                }
+            }
+
+            // Await expression: await this.foo()
+            "await_expression" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() != "await" {
+                        return self.extract_callee_name(child);
+                    }
+                }
+                String::new()
+            }
+
+            _ => self.node_text(node),
+        }
     }
 }
 
@@ -681,5 +783,80 @@ mod tests {
         assert_eq!(visitor.functions[0].name, "format");
         assert!(visitor.functions[0].is_static);
         assert_eq!(visitor.functions[0].parent_class, Some("Utils".to_string()));
+    }
+
+    #[test]
+    fn test_visitor_call_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"function caller() { callee(); helper(); }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "caller");
+
+        // Should extract 2 call relationships
+        assert_eq!(visitor.calls.len(), 2);
+        assert_eq!(visitor.calls[0].caller, "caller");
+        assert_eq!(visitor.calls[0].callee, "callee");
+        assert_eq!(visitor.calls[1].caller, "caller");
+        assert_eq!(visitor.calls[1].callee, "helper");
+    }
+
+    #[test]
+    fn test_visitor_method_call_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"class MyClass { myMethod() { this.helper(); this.anotherMethod(); } }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.classes.len(), 1);
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "myMethod");
+
+        // Should extract 2 call relationships (this.helper and this.anotherMethod)
+        assert_eq!(visitor.calls.len(), 2);
+        assert_eq!(visitor.calls[0].caller, "myMethod");
+        assert_eq!(visitor.calls[0].callee, "helper");
+        assert_eq!(visitor.calls[1].caller, "myMethod");
+        assert_eq!(visitor.calls[1].callee, "anotherMethod");
+    }
+
+    #[test]
+    fn test_visitor_async_call_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"async function fetchData() { await this.initialize(); const result = await this.getData(); }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert!(visitor.functions[0].is_async);
+
+        // Should extract calls from await expressions
+        assert!(visitor.calls.len() >= 2);
+        let callee_names: Vec<&str> = visitor.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(callee_names.contains(&"initialize"));
+        assert!(callee_names.contains(&"getData"));
     }
 }
