@@ -39,12 +39,13 @@ static RE_LIKELY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b(likely|unlikely)\s*\(").unwrap());
 
 // BUILD_BUG_ON(...) -> ((void)0)
+// Use [\s\S] to match across newlines, and match balanced parens
 static RE_BUILD_BUG_ON: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bBUILD_BUG_ON\s*\([^;]*\)").unwrap());
+    LazyLock::new(|| Regex::new(r"\bBUILD_BUG_ON\s*\(").unwrap());
 
 // BUILD_BUG_ON_MSG(...) -> ((void)0)
 static RE_BUILD_BUG_ON_MSG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bBUILD_BUG_ON_MSG\s*\([^;]*\)").unwrap());
+    LazyLock::new(|| Regex::new(r"\bBUILD_BUG_ON_MSG\s*\(").unwrap());
 
 // WARN_ON(x) -> (x)
 static RE_WARN_ON: LazyLock<Regex> =
@@ -107,6 +108,17 @@ static RE_RCU_DEREF: LazyLock<Regex> =
 // rcu_assign_pointer(p, v) -> ((p) = (v))
 static RE_RCU_ASSIGN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\brcu_assign_pointer\s*\(").unwrap());
+
+// rcu_read_lock() / rcu_read_unlock() -> empty statement
+static RE_RCU_READ_LOCK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\brcu_read_lock\s*\(\s*\)").unwrap());
+
+static RE_RCU_READ_UNLOCK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\brcu_read_unlock\s*\(\s*\)").unwrap());
+
+// synchronize_rcu() -> empty
+static RE_SYNCHRONIZE_RCU: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bsynchronize_rcu\s*\(\s*\)").unwrap());
 
 // READ_ONCE(x) / WRITE_ONCE(x, v) -> simplified
 static RE_READ_ONCE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bREAD_ONCE\s*\(").unwrap());
@@ -362,20 +374,39 @@ impl MacroNeutralizer {
     }
 
     fn handle_build_bug_on(&mut self, source: &str) -> String {
-        let mut result = source.to_string();
+        // Replace BUILD_BUG_ON(...) with ((void)0) using balanced paren matching
+        let result = self.replace_macro_with_void(source, &RE_BUILD_BUG_ON);
+        let count1 = RE_BUILD_BUG_ON.find_iter(source).count();
 
-        let count = RE_BUILD_BUG_ON.find_iter(&result).count()
-            + RE_BUILD_BUG_ON_MSG.find_iter(&result).count();
-        self.stats.build_bug_on_stripped += count;
+        let result = self.replace_macro_with_void(&result, &RE_BUILD_BUG_ON_MSG);
+        let count2 = RE_BUILD_BUG_ON_MSG.find_iter(source).count();
 
-        // Replace BUILD_BUG_ON(...) with ((void)0)
-        result = RE_BUILD_BUG_ON
-            .replace_all(&result, "((void)0)")
-            .to_string();
-        result = RE_BUILD_BUG_ON_MSG
-            .replace_all(&result, "((void)0)")
-            .to_string();
+        self.stats.build_bug_on_stripped += count1 + count2;
 
+        result
+    }
+
+    /// Replace a macro call with ((void)0), using balanced parenthesis matching
+    fn replace_macro_with_void(&self, source: &str, pattern: &Regex) -> String {
+        let mut result = String::new();
+        let mut last_end = 0;
+
+        for m in pattern.find_iter(source) {
+            result.push_str(&source[last_end..m.start()]);
+
+            // Find the matching closing paren
+            let remaining = &source[m.end()..];
+            if let Some(paren_end) = self.find_matching_paren(remaining) {
+                result.push_str("((void)0)");
+                last_end = m.end() + paren_end + 1; // +1 for the closing paren
+            } else {
+                // Couldn't find matching paren, keep original
+                result.push_str(m.as_str());
+                last_end = m.end();
+            }
+        }
+
+        result.push_str(&source[last_end..]);
         result
     }
 
@@ -465,8 +496,12 @@ impl MacroNeutralizer {
     fn simplify_rcu(&mut self, source: &str) -> String {
         let mut result = source.to_string();
 
-        let count =
-            RE_RCU_DEREF.find_iter(&result).count() + RE_RCU_ASSIGN.find_iter(&result).count();
+        // Count all RCU patterns
+        let count = RE_RCU_DEREF.find_iter(&result).count()
+            + RE_RCU_ASSIGN.find_iter(&result).count()
+            + RE_RCU_READ_LOCK.find_iter(&result).count()
+            + RE_RCU_READ_UNLOCK.find_iter(&result).count()
+            + RE_SYNCHRONIZE_RCU.find_iter(&result).count();
         self.stats.rcu_simplified += count;
 
         // rcu_dereference(p) -> (p)
@@ -475,6 +510,18 @@ impl MacroNeutralizer {
         // rcu_assign_pointer needs special handling - it's rcu_assign_pointer(p, v)
         // For now, simplify to just a comment
         // This is complex because it has two args
+
+        // rcu_read_lock() / rcu_read_unlock() -> ((void)0)
+        // These are barrier operations, safe to stub out for parsing
+        result = RE_RCU_READ_LOCK
+            .replace_all(&result, "((void)0)")
+            .to_string();
+        result = RE_RCU_READ_UNLOCK
+            .replace_all(&result, "((void)0)")
+            .to_string();
+        result = RE_SYNCHRONIZE_RCU
+            .replace_all(&result, "((void)0)")
+            .to_string();
 
         result
     }
@@ -498,17 +545,56 @@ impl MacroNeutralizer {
     }
 
     fn handle_typeof(&mut self, source: &str) -> String {
-        let result = source.to_string();
+        let mut result = String::new();
+        let mut last_end = 0;
+        let mut count = 0;
 
-        let count = RE_TYPEOF.find_iter(&result).count();
+        // typeof(x) -> __auto_type or just remove in cast contexts
+        // For casts like (typeof(x))y, we can simplify to just the variable type
+        for m in RE_TYPEOF.find_iter(source) {
+            result.push_str(&source[last_end..m.start()]);
+
+            let remaining = &source[m.end()..];
+            if let Some(paren_end) = self.find_matching_paren(remaining) {
+                let arg = &remaining[..paren_end];
+                count += 1;
+
+                // Check if this is a cast context: (typeof(x))
+                // Look back to see if we're inside parens
+                let before = &source[..m.start()];
+                let trimmed_before = before.trim_end();
+
+                if trimmed_before.ends_with('(') {
+                    // This is likely a cast: (typeof(x))
+                    // Check what comes after the closing paren
+                    let after_paren = &source[m.end() + paren_end + 1..];
+                    if after_paren.trim_start().starts_with(')') {
+                        // Replace (typeof(x)) with (__typeof_cast__)
+                        // which is valid C syntax (though meaningless)
+                        result.push_str("void *");
+                    } else {
+                        // Keep typeof but mark it
+                        result.push_str("__auto_type /* typeof(");
+                        result.push_str(arg);
+                        result.push_str(") */");
+                    }
+                } else {
+                    // Variable declaration: typeof(x) var = ...
+                    // Replace with __auto_type which is a GCC extension but parseable
+                    // Or use void* as fallback
+                    result.push_str("__auto_type /* typeof(");
+                    result.push_str(arg);
+                    result.push_str(") */");
+                }
+                last_end = m.end() + paren_end + 1;
+            } else {
+                result.push_str(m.as_str());
+                last_end = m.end();
+            }
+        }
+
+        result.push_str(&source[last_end..]);
         self.stats.typeof_replaced += count;
-
-        // For simple typeof(x), we can't easily determine the type
-        // Replace with void* as a fallback for pointer contexts
-        // This is imperfect but allows parsing to continue
-
-        // typeof in variable declarations is tricky
-        // For now, just track the count - full expansion needs type inference
 
         result
     }
