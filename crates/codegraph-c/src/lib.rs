@@ -10,6 +10,8 @@
 //! - Calculate cyclomatic complexity metrics
 //! - **Tolerant parsing mode** for incomplete/kernel code
 //! - **Macro preprocessing** for Linux kernel and system code
+//! - **Layered processing pipeline** for better parsing of kernel code
+//! - **Platform detection** with support for Linux, FreeBSD, Darwin
 //! - Full integration with codegraph-parser-api
 //!
 //! ## Quick Start
@@ -52,10 +54,34 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! ## Layered Pipeline
+//!
+//! For advanced processing with platform-specific optimizations:
+//!
+//! ```rust,no_run
+//! use codegraph_c::pipeline::{Pipeline, PipelineConfig};
+//!
+//! let pipeline = Pipeline::new();
+//! let config = PipelineConfig::for_kernel_code();
+//!
+//! let source = r#"
+//! #include <linux/module.h>
+//! MODULE_LICENSE("GPL");
+//! static __init int my_init(void) { return 0; }
+//! "#;
+//!
+//! let result = pipeline.process(source, &config);
+//! println!("Platform: {} (confidence: {:.0}%)",
+//!     result.platform.platform_id,
+//!     result.platform.confidence * 100.0);
+//! ```
 
 pub mod extractor;
 mod mapper;
 mod parser_impl;
+pub mod pipeline;
+pub mod platform;
 pub mod preprocessor;
 pub mod visitor;
 
@@ -69,5 +95,7 @@ pub use parser_impl::CParser;
 
 // Export key types from submodules
 pub use extractor::{ExtractionOptions, ExtractionResult};
+pub use pipeline::{Pipeline, PipelineConfig, PipelineResult};
+pub use platform::{DetectionResult, PlatformModule, PlatformRegistry};
 pub use preprocessor::{CPreprocessor, MacroInfo, MacroKind};
 pub use visitor::FunctionCall;

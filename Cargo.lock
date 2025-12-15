@@ -224,6 +224,7 @@ dependencies = [
  "codegraph-parser-api",
  "criterion",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

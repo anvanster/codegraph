@@ -1,13 +1,15 @@
 //! Test tolerant parsing mode against Linux kernel ICE driver
 //!
-//! This example demonstrates the new hybrid parsing approach:
-//! 1. Macro preprocessing to handle kernel-specific macros
-//! 2. Tolerant parsing to extract entities even with syntax errors
-//! 3. Call graph extraction for function relationships
+//! This example demonstrates the parsing approaches:
+//! 1. Strict mode - original behavior, fails on syntax errors
+//! 2. Tolerant mode - extract entities even with syntax errors
+//! 3. Kernel mode - preprocessing + tolerant
+//! 4. Pipeline mode - new layered pipeline with platform detection
 
 #![allow(clippy::uninlined_format_args, dead_code)]
 
 use codegraph_c::extractor::{extract_with_options, ExtractionOptions};
+use codegraph_c::pipeline::{Pipeline, PipelineConfig};
 use codegraph_c::preprocessor::CPreprocessor;
 use codegraph_parser_api::ParserConfig;
 use std::fs;
@@ -78,6 +80,14 @@ fn main() {
     println!("===========================================");
     let kernel_results = parse_files(&c_files, &config, &ExtractionOptions::for_kernel_code());
     print_results(&kernel_results);
+
+    // Test 4: Pipeline mode (new layered pipeline)
+    println!();
+    println!("===========================================");
+    println!("MODE 4: PIPELINE (layered processing)");
+    println!("===========================================");
+    let pipeline_results = parse_files_with_pipeline(&c_files, &config);
+    print_pipeline_results(&pipeline_results);
 
     // Show macro analysis
     println!();
@@ -150,6 +160,208 @@ fn parse_files(
 
     results.parse_time = start.elapsed();
     results
+}
+
+struct PipelineParseResults {
+    total_files: usize,
+    successful_files: usize,
+    partial_files: usize,
+    failed_files: usize,
+    total_functions: usize,
+    total_structs: usize,
+    total_errors: usize,
+    parse_time: std::time::Duration,
+    // Pipeline-specific stats
+    stubs_injected: usize,
+    conditionals_stripped: usize,
+    gcc_neutralized: usize,
+    attributes_stripped: usize,
+    platform_confidence: f32,
+    // Macro neutralization stats
+    likely_unlikely_stripped: usize,
+    build_bug_on_stripped: usize,
+    warn_on_stripped: usize,
+    define_macros_stubbed: usize,
+    rcu_simplified: usize,
+    typeof_replaced: usize,
+    // Iterator macro stats
+    list_for_each_expanded: usize,
+    for_each_expanded: usize,
+    container_of_expanded: usize,
+}
+
+fn parse_files_with_pipeline(
+    files: &[std::path::PathBuf],
+    config: &ParserConfig,
+) -> PipelineParseResults {
+    let start = Instant::now();
+    let pipeline = Pipeline::new();
+    let pipeline_config = PipelineConfig::for_kernel_code();
+    let options = ExtractionOptions::tolerant();
+
+    let mut results = PipelineParseResults {
+        total_files: files.len(),
+        successful_files: 0,
+        partial_files: 0,
+        failed_files: 0,
+        total_functions: 0,
+        total_structs: 0,
+        total_errors: 0,
+        parse_time: std::time::Duration::ZERO,
+        stubs_injected: 0,
+        conditionals_stripped: 0,
+        gcc_neutralized: 0,
+        attributes_stripped: 0,
+        platform_confidence: 0.0,
+        likely_unlikely_stripped: 0,
+        build_bug_on_stripped: 0,
+        warn_on_stripped: 0,
+        define_macros_stubbed: 0,
+        rcu_simplified: 0,
+        typeof_replaced: 0,
+        list_for_each_expanded: 0,
+        for_each_expanded: 0,
+        container_of_expanded: 0,
+    };
+
+    let mut confidence_sum = 0.0;
+    let mut confidence_count = 0;
+
+    for path in files {
+        match fs::read_to_string(path) {
+            Ok(source) => {
+                // First pass through pipeline
+                let pipeline_result = pipeline.process(&source, &pipeline_config);
+
+                // Accumulate pipeline stats
+                results.stubs_injected += pipeline_result.stats.stubs_injected;
+                results.conditionals_stripped += pipeline_result.stats.conditionals_stripped;
+                results.gcc_neutralized += pipeline_result.stats.gcc_neutralized;
+                results.attributes_stripped += pipeline_result.stats.attributes_stripped;
+                confidence_sum += pipeline_result.platform.confidence;
+                confidence_count += 1;
+
+                // Accumulate macro stats
+                let ms = &pipeline_result.stats.macro_stats;
+                results.likely_unlikely_stripped += ms.likely_unlikely_stripped;
+                results.build_bug_on_stripped += ms.build_bug_on_stripped;
+                results.warn_on_stripped += ms.warn_on_stripped;
+                results.define_macros_stubbed += ms.define_macros_stubbed;
+                results.rcu_simplified += ms.rcu_simplified;
+                results.typeof_replaced += ms.typeof_replaced;
+                results.list_for_each_expanded += ms.list_for_each_expanded;
+                results.for_each_expanded += ms.for_each_expanded;
+                results.container_of_expanded += ms.container_of_expanded;
+
+                // Now extract from processed source
+                match extract_with_options(&pipeline_result.source, path, config, &options) {
+                    Ok(extraction) => {
+                        results.total_functions += extraction.ir.functions.len();
+                        results.total_structs += extraction.ir.classes.len();
+                        results.total_errors += extraction.error_count;
+
+                        if extraction.is_partial {
+                            results.partial_files += 1;
+                        } else {
+                            results.successful_files += 1;
+                        }
+                    }
+                    Err(_) => {
+                        results.failed_files += 1;
+                    }
+                }
+            }
+            Err(_) => {
+                results.failed_files += 1;
+            }
+        }
+    }
+
+    results.parse_time = start.elapsed();
+    results.platform_confidence = if confidence_count > 0 {
+        confidence_sum / confidence_count as f32
+    } else {
+        0.0
+    };
+    results
+}
+
+fn print_pipeline_results(results: &PipelineParseResults) {
+    let success_rate = if results.total_files > 0 {
+        (results.successful_files + results.partial_files) as f64 / results.total_files as f64
+            * 100.0
+    } else {
+        0.0
+    };
+
+    println!("Files analyzed: {}", results.total_files);
+    println!(
+        "  - Clean parses: {} ({:.1}%)",
+        results.successful_files,
+        results.successful_files as f64 / results.total_files as f64 * 100.0
+    );
+    println!(
+        "  - Partial parses: {} ({:.1}%)",
+        results.partial_files,
+        results.partial_files as f64 / results.total_files as f64 * 100.0
+    );
+    println!(
+        "  - Failed: {} ({:.1}%)",
+        results.failed_files,
+        results.failed_files as f64 / results.total_files as f64 * 100.0
+    );
+    println!("Overall success rate: {:.1}%", success_rate);
+    println!();
+    println!("Entities extracted:");
+    println!("  - Functions: {}", results.total_functions);
+    println!("  - Structs/Types: {}", results.total_structs);
+    println!("  - Syntax errors: {}", results.total_errors);
+    println!();
+    println!("Pipeline statistics:");
+    println!(
+        "  - Platform confidence: {:.1}%",
+        results.platform_confidence * 100.0
+    );
+    println!("  - Header stubs injected: {}", results.stubs_injected);
+    println!(
+        "  - Conditionals stripped: {}",
+        results.conditionals_stripped
+    );
+    println!(
+        "  - GCC extensions neutralized: {}",
+        results.gcc_neutralized
+    );
+    println!("  - Attributes stripped: {}", results.attributes_stripped);
+    println!();
+    println!("Macro neutralization:");
+    println!(
+        "  - likely/unlikely stripped: {}",
+        results.likely_unlikely_stripped
+    );
+    println!(
+        "  - BUILD_BUG_ON stripped: {}",
+        results.build_bug_on_stripped
+    );
+    println!("  - WARN_ON/BUG_ON stripped: {}", results.warn_on_stripped);
+    println!(
+        "  - DEFINE_* macros stubbed: {}",
+        results.define_macros_stubbed
+    );
+    println!("  - RCU macros simplified: {}", results.rcu_simplified);
+    println!("  - typeof() replaced: {}", results.typeof_replaced);
+    println!();
+    println!("Iterator macro handling:");
+    println!(
+        "  - list_for_each_* expanded: {}",
+        results.list_for_each_expanded
+    );
+    println!("  - for_each_* expanded: {}", results.for_each_expanded);
+    println!(
+        "  - container_of expanded: {}",
+        results.container_of_expanded
+    );
+    println!();
+    println!("Parse time: {:.2?}", results.parse_time);
 }
 
 fn print_results(results: &ParseResults) {

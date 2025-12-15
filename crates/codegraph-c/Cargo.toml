@@ -20,6 +20,7 @@ thiserror.workspace = true
 tree-sitter = "0.20"
 tree-sitter-c = "0.20"
 rayon = "1.10"
+regex = "1.10"
 
 [dev-dependencies]
 serde_json.workspace = true
