@@ -1,4 +1,4 @@
-use codegraph::{helpers, CodeGraph, NodeId};
+use codegraph::{helpers, CodeGraph, EdgeType, NodeId, NodeType, PropertyMap};
 use codegraph_parser_api::CodeIR;
 use std::collections::HashMap;
 
@@ -27,14 +27,42 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
 
     // Add all functions
     for func in &ir.functions {
-        let func_id = helpers::add_function(
-            graph,
-            file_id,
-            &func.name,
-            func.line_start as i64,
-            func.line_end as i64,
-        )
-        .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+        let mut props = PropertyMap::new()
+            .with("name", func.name.clone())
+            .with("signature", func.signature.clone())
+            .with("line_start", func.line_start as i64)
+            .with("line_end", func.line_end as i64)
+            .with("visibility", func.visibility.clone())
+            .with("is_async", func.is_async)
+            .with("is_test", func.is_test);
+
+        // Add complexity metrics if available
+        if let Some(ref complexity) = func.complexity {
+            props = props
+                .with("complexity", complexity.cyclomatic_complexity as i64)
+                .with("complexity_grade", complexity.grade().to_string())
+                .with("complexity_branches", complexity.branches as i64)
+                .with("complexity_loops", complexity.loops as i64)
+                .with(
+                    "complexity_logical_ops",
+                    complexity.logical_operators as i64,
+                )
+                .with("complexity_nesting", complexity.max_nesting_depth as i64)
+                .with(
+                    "complexity_exceptions",
+                    complexity.exception_handlers as i64,
+                )
+                .with("complexity_early_returns", complexity.early_returns as i64);
+        }
+
+        let func_id = graph
+            .add_node(NodeType::Function, props)
+            .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+
+        // Add Contains edge from file to function
+        graph
+            .add_edge(file_id, func_id, EdgeType::Contains, PropertyMap::new())
+            .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
 
         entity_map.insert(func.name.clone(), func_id);
     }

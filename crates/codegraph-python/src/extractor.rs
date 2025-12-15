@@ -1,8 +1,8 @@
 // Use parser-API types instead of local duplicates
 use crate::config::ParserConfig;
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, CodeIR, FunctionEntity, ImportRelation, InheritanceRelation,
-    ModuleEntity,
+    CallRelation, ClassEntity, CodeIR, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImportRelation, InheritanceRelation, ModuleEntity,
 };
 use rustpython_ast::Stmt;
 use rustpython_parser::{ast, Parse};
@@ -44,7 +44,12 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
                 // Create basic function entity (top-level functions only)
                 let line_start = idx + 1; // Simplified line numbering
                 let line_end = line_start + func_def.body.len();
-                let func = FunctionEntity::new(func_def.name.as_str(), line_start, line_end);
+
+                // Calculate complexity metrics
+                let complexity = calculate_complexity_from_body(&func_def.body);
+
+                let func = FunctionEntity::new(func_def.name.as_str(), line_start, line_end)
+                    .with_complexity(complexity);
                 ir.add_function(func);
 
                 // Extract calls from function body
@@ -62,8 +67,13 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
 
                 let line_start = idx + 1;
                 let line_end = line_start + func_def.body.len();
-                let func =
-                    FunctionEntity::new(func_def.name.as_str(), line_start, line_end).async_fn();
+
+                // Calculate complexity metrics
+                let complexity = calculate_complexity_from_body(&func_def.body);
+
+                let func = FunctionEntity::new(func_def.name.as_str(), line_start, line_end)
+                    .async_fn()
+                    .with_complexity(complexity);
                 ir.add_function(func);
 
                 // Extract calls from async function body
@@ -84,11 +94,16 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
                         Stmt::FunctionDef(method_def) => {
                             let method_line_start = line_start + method_idx + 1;
                             let method_line_end = method_line_start + method_def.body.len();
+
+                            // Calculate complexity metrics for method
+                            let complexity = calculate_complexity_from_body(&method_def.body);
+
                             let method = FunctionEntity::new(
                                 method_def.name.as_str(),
                                 method_line_start,
                                 method_line_end,
-                            );
+                            )
+                            .with_complexity(complexity);
                             methods.push(method);
 
                             // Extract calls from method body
@@ -106,12 +121,17 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
                         Stmt::AsyncFunctionDef(method_def) => {
                             let method_line_start = line_start + method_idx + 1;
                             let method_line_end = method_line_start + method_def.body.len();
+
+                            // Calculate complexity metrics for async method
+                            let complexity = calculate_complexity_from_body(&method_def.body);
+
                             let method = FunctionEntity::new(
                                 method_def.name.as_str(),
                                 method_line_start,
                                 method_line_end,
                             )
-                            .async_fn();
+                            .async_fn()
+                            .with_complexity(complexity);
                             methods.push(method);
 
                             // Extract calls from async method body
@@ -221,6 +241,286 @@ fn extract_calls_from_body(
     }
 
     calls
+}
+
+/// Calculate cyclomatic complexity metrics from a function body
+fn calculate_complexity_from_body(body: &[Stmt]) -> ComplexityMetrics {
+    let mut builder = ComplexityBuilder::new();
+
+    for stmt in body {
+        calculate_complexity_from_stmt(stmt, &mut builder);
+    }
+
+    builder.build()
+}
+
+/// Recursively calculate complexity from a statement
+fn calculate_complexity_from_stmt(stmt: &Stmt, builder: &mut ComplexityBuilder) {
+    match stmt {
+        Stmt::If(if_stmt) => {
+            // Each if adds a branch
+            builder.add_branch();
+            builder.enter_scope();
+
+            // Process if body
+            for s in &if_stmt.body {
+                calculate_complexity_from_stmt(s, builder);
+            }
+
+            builder.exit_scope();
+
+            // Process else/elif
+            if !if_stmt.orelse.is_empty() {
+                // Check if orelse is an elif (single If statement) or else block
+                if if_stmt.orelse.len() == 1 {
+                    if let Stmt::If(_) = &if_stmt.orelse[0] {
+                        // This is an elif - process it (will add its own branch)
+                        calculate_complexity_from_stmt(&if_stmt.orelse[0], builder);
+                    } else {
+                        // Regular else with single statement
+                        builder.add_branch();
+                        builder.enter_scope();
+                        calculate_complexity_from_stmt(&if_stmt.orelse[0], builder);
+                        builder.exit_scope();
+                    }
+                } else {
+                    // Regular else block with multiple statements
+                    builder.add_branch();
+                    builder.enter_scope();
+                    for s in &if_stmt.orelse {
+                        calculate_complexity_from_stmt(s, builder);
+                    }
+                    builder.exit_scope();
+                }
+            }
+
+            // Count logical operators in condition
+            calculate_complexity_from_expr(&if_stmt.test, builder);
+        }
+        Stmt::While(while_stmt) => {
+            builder.add_loop();
+            builder.enter_scope();
+
+            // Count logical operators in condition
+            calculate_complexity_from_expr(&while_stmt.test, builder);
+
+            for s in &while_stmt.body {
+                calculate_complexity_from_stmt(s, builder);
+            }
+
+            builder.exit_scope();
+
+            // Handle else clause (Python-specific)
+            if !while_stmt.orelse.is_empty() {
+                builder.enter_scope();
+                for s in &while_stmt.orelse {
+                    calculate_complexity_from_stmt(s, builder);
+                }
+                builder.exit_scope();
+            }
+        }
+        Stmt::For(for_stmt) => {
+            builder.add_loop();
+            builder.enter_scope();
+
+            for s in &for_stmt.body {
+                calculate_complexity_from_stmt(s, builder);
+            }
+
+            builder.exit_scope();
+
+            // Handle else clause (Python-specific)
+            if !for_stmt.orelse.is_empty() {
+                builder.enter_scope();
+                for s in &for_stmt.orelse {
+                    calculate_complexity_from_stmt(s, builder);
+                }
+                builder.exit_scope();
+            }
+        }
+        Stmt::With(with_stmt) => {
+            // With statements create a scope but don't add complexity
+            builder.enter_scope();
+            for s in &with_stmt.body {
+                calculate_complexity_from_stmt(s, builder);
+            }
+            builder.exit_scope();
+        }
+        Stmt::Try(try_stmt) => {
+            builder.enter_scope();
+            for s in &try_stmt.body {
+                calculate_complexity_from_stmt(s, builder);
+            }
+            builder.exit_scope();
+
+            // Each exception handler adds complexity
+            for handler in &try_stmt.handlers {
+                builder.add_exception_handler();
+                let ast::ExceptHandler::ExceptHandler(h) = handler;
+                builder.enter_scope();
+                for s in &h.body {
+                    calculate_complexity_from_stmt(s, builder);
+                }
+                builder.exit_scope();
+            }
+
+            // Finally clause
+            if !try_stmt.finalbody.is_empty() {
+                builder.enter_scope();
+                for s in &try_stmt.finalbody {
+                    calculate_complexity_from_stmt(s, builder);
+                }
+                builder.exit_scope();
+            }
+
+            // Else clause (runs if no exception)
+            if !try_stmt.orelse.is_empty() {
+                builder.enter_scope();
+                for s in &try_stmt.orelse {
+                    calculate_complexity_from_stmt(s, builder);
+                }
+                builder.exit_scope();
+            }
+        }
+        Stmt::Match(match_stmt) => {
+            // Each match case adds a branch (like switch/case)
+            for case in &match_stmt.cases {
+                builder.add_branch();
+                builder.enter_scope();
+                for s in &case.body {
+                    calculate_complexity_from_stmt(s, builder);
+                }
+                builder.exit_scope();
+            }
+        }
+        Stmt::Return(return_stmt) => {
+            // Track early returns (not at the end of function)
+            // Note: We can't easily detect if this is the last statement
+            // For now, count all returns - could be refined later
+            if let Some(ref value) = return_stmt.value {
+                calculate_complexity_from_expr(value, builder);
+            }
+        }
+        Stmt::Expr(expr_stmt) => {
+            calculate_complexity_from_expr(&expr_stmt.value, builder);
+        }
+        Stmt::Assign(assign) => {
+            calculate_complexity_from_expr(&assign.value, builder);
+        }
+        Stmt::AnnAssign(ann_assign) => {
+            if let Some(ref value) = ann_assign.value {
+                calculate_complexity_from_expr(value, builder);
+            }
+        }
+        Stmt::AugAssign(aug_assign) => {
+            calculate_complexity_from_expr(&aug_assign.value, builder);
+        }
+        Stmt::FunctionDef(_) | Stmt::AsyncFunctionDef(_) => {
+            // Nested functions are counted separately when extracted
+            // Don't add their complexity to parent
+        }
+        Stmt::ClassDef(_) => {
+            // Nested classes are counted separately
+        }
+        _ => {
+            // Other statement types don't add complexity
+        }
+    }
+}
+
+/// Calculate complexity from expressions (mainly for logical operators)
+fn calculate_complexity_from_expr(expr: &ast::Expr, builder: &mut ComplexityBuilder) {
+    use ast::Expr;
+
+    match expr {
+        Expr::BoolOp(bool_op) => {
+            // Each && (and) or || (or) adds complexity
+            // The number of operators is (number of values - 1)
+            for _ in 0..bool_op.values.len().saturating_sub(1) {
+                builder.add_logical_operator();
+            }
+
+            // Also check nested expressions
+            for value in &bool_op.values {
+                calculate_complexity_from_expr(value, builder);
+            }
+        }
+        Expr::IfExp(if_exp) => {
+            // Ternary expression: a if condition else b
+            builder.add_branch();
+            calculate_complexity_from_expr(&if_exp.test, builder);
+            calculate_complexity_from_expr(&if_exp.body, builder);
+            calculate_complexity_from_expr(&if_exp.orelse, builder);
+        }
+        Expr::Lambda(lambda) => {
+            // Lambda expressions can contain complexity
+            calculate_complexity_from_expr(&lambda.body, builder);
+        }
+        Expr::ListComp(list_comp) => {
+            // List comprehensions with conditions add complexity
+            for generator in &list_comp.generators {
+                builder.add_loop(); // The for part
+                for if_clause in &generator.ifs {
+                    builder.add_branch(); // Each if filter
+                    calculate_complexity_from_expr(if_clause, builder);
+                }
+            }
+            calculate_complexity_from_expr(&list_comp.elt, builder);
+        }
+        Expr::SetComp(set_comp) => {
+            for generator in &set_comp.generators {
+                builder.add_loop();
+                for if_clause in &generator.ifs {
+                    builder.add_branch();
+                    calculate_complexity_from_expr(if_clause, builder);
+                }
+            }
+            calculate_complexity_from_expr(&set_comp.elt, builder);
+        }
+        Expr::DictComp(dict_comp) => {
+            for generator in &dict_comp.generators {
+                builder.add_loop();
+                for if_clause in &generator.ifs {
+                    builder.add_branch();
+                    calculate_complexity_from_expr(if_clause, builder);
+                }
+            }
+            calculate_complexity_from_expr(&dict_comp.key, builder);
+            calculate_complexity_from_expr(&dict_comp.value, builder);
+        }
+        Expr::GeneratorExp(gen_exp) => {
+            for generator in &gen_exp.generators {
+                builder.add_loop();
+                for if_clause in &generator.ifs {
+                    builder.add_branch();
+                    calculate_complexity_from_expr(if_clause, builder);
+                }
+            }
+            calculate_complexity_from_expr(&gen_exp.elt, builder);
+        }
+        Expr::Call(call_expr) => {
+            // Check arguments for nested complexity
+            for arg in &call_expr.args {
+                calculate_complexity_from_expr(arg, builder);
+            }
+        }
+        Expr::BinOp(binop) => {
+            calculate_complexity_from_expr(&binop.left, builder);
+            calculate_complexity_from_expr(&binop.right, builder);
+        }
+        Expr::UnaryOp(unary) => {
+            calculate_complexity_from_expr(&unary.operand, builder);
+        }
+        Expr::Compare(compare) => {
+            calculate_complexity_from_expr(&compare.left, builder);
+            for comparator in &compare.comparators {
+                calculate_complexity_from_expr(comparator, builder);
+            }
+        }
+        _ => {
+            // Other expressions don't add complexity
+        }
+    }
 }
 
 /// Recursively extract calls from a statement
@@ -669,6 +969,154 @@ class GermanShepherd(Dog):
             gs_inheritance.is_some(),
             "GermanShepherd should inherit from Dog"
         );
+    }
+
+    #[test]
+    fn test_complexity_simple_function() {
+        let source = r#"
+def simple():
+    return 1
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        assert!(func.complexity.is_some());
+        let complexity = func.complexity.as_ref().unwrap();
+        // Simple function has base complexity of 1
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.grade(), 'A');
+    }
+
+    #[test]
+    fn test_complexity_with_branches() {
+        let source = r#"
+def branching(x):
+    if x > 0:
+        return 1
+    elif x < 0:
+        return -1
+    else:
+        return 0
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        let complexity = func.complexity.as_ref().unwrap();
+        // CC = 1 + 3 branches (if, elif, else) = 4
+        assert_eq!(complexity.branches, 3);
+        assert!(complexity.cyclomatic_complexity >= 4);
+    }
+
+    #[test]
+    fn test_complexity_with_loops() {
+        let source = r#"
+def loopy(items):
+    total = 0
+    for item in items:
+        while item > 0:
+            total += 1
+            item -= 1
+    return total
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        let complexity = func.complexity.as_ref().unwrap();
+        // CC = 1 + 2 loops (for, while) = 3
+        assert_eq!(complexity.loops, 2);
+        assert!(complexity.cyclomatic_complexity >= 3);
+    }
+
+    #[test]
+    fn test_complexity_with_logical_operators() {
+        let source = r#"
+def complex_condition(a, b, c):
+    if a > 0 and b > 0 or c > 0:
+        return True
+    return False
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        let complexity = func.complexity.as_ref().unwrap();
+        // Has 'and' and 'or' = 2 logical operators
+        assert_eq!(complexity.logical_operators, 2);
+    }
+
+    #[test]
+    fn test_complexity_with_try_except() {
+        let source = r#"
+def risky():
+    try:
+        result = dangerous_operation()
+    except ValueError:
+        result = 0
+    except TypeError:
+        result = -1
+    return result
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        let complexity = func.complexity.as_ref().unwrap();
+        // 2 exception handlers
+        assert_eq!(complexity.exception_handlers, 2);
+    }
+
+    #[test]
+    fn test_complexity_nesting_depth() {
+        let source = r#"
+def deeply_nested(items):
+    for item in items:
+        if item > 0:
+            while item > 10:
+                if item % 2 == 0:
+                    item -= 2
+                else:
+                    item -= 1
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        let complexity = func.complexity.as_ref().unwrap();
+        // Nesting: for > if > while > if/else = 4 levels
+        assert!(complexity.max_nesting_depth >= 4);
+    }
+
+    #[test]
+    fn test_complexity_list_comprehension() {
+        let source = r#"
+def comprehension(items):
+    return [x * 2 for x in items if x > 0]
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 1);
+        let func = &ir.functions[0];
+        let complexity = func.complexity.as_ref().unwrap();
+        // List comprehension with filter: 1 loop + 1 branch
+        assert!(complexity.loops >= 1);
+        assert!(complexity.branches >= 1);
     }
 
     #[test]

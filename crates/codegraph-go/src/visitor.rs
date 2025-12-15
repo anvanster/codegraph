@@ -72,6 +72,7 @@ impl<'a> GoVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
+            complexity: None,
         };
 
         self.functions.push(func);
@@ -103,6 +104,7 @@ impl<'a> GoVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
+            complexity: None,
         };
 
         self.functions.push(func);

@@ -180,6 +180,7 @@ impl<'ast> Visit<'ast> for RustVisitor {
             doc_comment: doc,
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
+            complexity: None,
         };
 
         self.functions.push(func);
@@ -313,6 +314,7 @@ impl<'ast> Visit<'ast> for RustVisitor {
                     doc_comment: Self::extract_doc(&method.attrs),
                     attributes: Vec::new(),
                     parent_class: Some(name.clone()),
+                    complexity: None,
                 };
 
                 required_methods.push(func);
@@ -418,6 +420,7 @@ impl<'ast> Visit<'ast> for RustVisitor {
                     doc_comment: doc,
                     attributes: Vec::new(),
                     parent_class: Some(implementor.clone()),
+                    complexity: None,
                 };
 
                 self.functions.push(func);

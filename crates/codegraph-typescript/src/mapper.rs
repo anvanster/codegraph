@@ -55,12 +55,31 @@ pub fn ir_to_graph(
 
     // Add functions
     for func in &ir.functions {
-        let props = PropertyMap::new()
+        let mut props = PropertyMap::new()
             .with("name", func.name.clone())
             .with("signature", func.signature.clone())
             .with("line_start", func.line_start as i64)
             .with("line_end", func.line_end as i64)
             .with("is_async", func.is_async);
+
+        // Add complexity metrics if available
+        if let Some(ref complexity) = func.complexity {
+            props = props
+                .with("complexity", complexity.cyclomatic_complexity as i64)
+                .with("complexity_grade", complexity.grade().to_string())
+                .with("complexity_branches", complexity.branches as i64)
+                .with("complexity_loops", complexity.loops as i64)
+                .with(
+                    "complexity_logical_ops",
+                    complexity.logical_operators as i64,
+                )
+                .with("complexity_nesting", complexity.max_nesting_depth as i64)
+                .with(
+                    "complexity_exceptions",
+                    complexity.exception_handlers as i64,
+                )
+                .with("complexity_early_returns", complexity.early_returns as i64);
+        }
 
         let func_id = graph
             .add_node(NodeType::Function, props)

@@ -5,7 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v0.2.0
+## [Unreleased]
+
+### Added
+
+#### Cyclomatic Complexity Analysis (`codegraph-parser-api` v0.2.0)
+- New `ComplexityMetrics` struct for comprehensive complexity analysis
+- `ComplexityBuilder` for incremental complexity tracking during AST traversal
+- Metrics tracked: cyclomatic complexity, branches, loops, logical operators, max nesting depth, exception handlers, early returns
+- Letter grading system (A-F) based on industry-standard thresholds
+- Integration with `FunctionEntity` via optional `complexity` field
+- 11 unit tests for complexity calculation
+
+#### Python Parser Complexity (`codegraph-python` v0.3.0)
+- Full AST-based cyclomatic complexity calculation
+- Handles: if/elif/else, while, for, with, try/except, match statements
+- List comprehension complexity tracking
+- Boolean operator analysis (and, or)
+- Nesting depth tracking
+- 7 new complexity tests
+
+#### TypeScript Parser Complexity (`codegraph-typescript` v0.3.0)
+- Full AST-based cyclomatic complexity calculation using tree-sitter
+- Handles: if/else, switch/case, ternary expressions, for/while/do loops
+- Try/catch exception handling
+- Logical operator analysis (&&, ||)
+- Nesting depth tracking
+- 9 new complexity tests
+
+#### Graph Property Storage
+- Complexity metrics stored as node properties in graph
+- Properties: complexity, complexity_grade, complexity_branches, complexity_loops, complexity_logical_ops, complexity_nesting, complexity_exceptions, complexity_early_returns
+
+### Changed
+- `codegraph-parser-api` bumped to v0.2.0 (new complexity module)
+- `codegraph-python` bumped to v0.3.0 (complexity integration)
+- `codegraph-typescript` bumped to v0.3.0 (complexity integration)
+- Python builder now uses direct PropertyMap for richer function metadata
+- TypeScript mapper includes complexity properties when available
+
+## [0.2.0] - Previous Release
 
 ### Added
 

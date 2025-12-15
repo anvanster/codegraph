@@ -57,6 +57,7 @@
 //! }
 //! ```
 
+pub mod complexity;
 pub mod config;
 pub mod entities;
 pub mod errors;
@@ -66,6 +67,7 @@ pub mod relationships;
 pub mod traits;
 
 // Re-export commonly used types
+pub use complexity::{ComplexityBuilder, ComplexityMetrics};
 pub use config::ParserConfig;
 pub use entities::{ClassEntity, Field, FunctionEntity, ModuleEntity, Parameter, TraitEntity};
 pub use errors::{ParserError, ParserResult};

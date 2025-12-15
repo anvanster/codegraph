@@ -1,8 +1,9 @@
 //! AST visitor for extracting TypeScript/JavaScript entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, ParserConfig, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, ParserConfig,
+    TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -101,6 +102,11 @@ impl<'a> TypeScriptVisitor<'a> {
         // Check if async
         let is_async = self.node_text(node).starts_with("async");
 
+        // Calculate complexity from the function body
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self
@@ -121,6 +127,7 @@ impl<'a> TypeScriptVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
+            complexity,
         };
 
         self.functions.push(func);
@@ -141,6 +148,11 @@ impl<'a> TypeScriptVisitor<'a> {
     }
 
     fn visit_arrow_function(&mut self, node: Node) {
+        // Calculate complexity from the arrow function body
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: "arrow_function".to_string(),
             signature: "() => {}".to_string(),
@@ -156,6 +168,7 @@ impl<'a> TypeScriptVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -187,6 +200,11 @@ impl<'a> TypeScriptVisitor<'a> {
             "public".to_string()
         };
 
+        // Calculate complexity from the method body
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: node_text.lines().next().unwrap_or("").to_string(),
@@ -202,6 +220,7 @@ impl<'a> TypeScriptVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
+            complexity,
         };
 
         self.functions.push(func);
@@ -457,6 +476,135 @@ impl<'a> TypeScriptVisitor<'a> {
             }
 
             _ => self.node_text(node),
+        }
+    }
+
+    /// Calculate cyclomatic complexity for a function/method body
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.calculate_complexity_recursive(body, &mut builder);
+        builder.build()
+    }
+
+    /// Recursively calculate complexity from a tree-sitter node
+    fn calculate_complexity_recursive(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            // Control flow - branches
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+                // Process children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+                builder.exit_scope();
+            }
+            "else_clause" => {
+                builder.add_branch();
+                builder.enter_scope();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+                builder.exit_scope();
+            }
+            "switch_statement" => {
+                builder.enter_scope();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+                builder.exit_scope();
+            }
+            "switch_case" | "switch_default" => {
+                builder.add_branch();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+            }
+            "ternary_expression" => {
+                builder.add_branch();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+            }
+
+            // Loops
+            "for_statement" | "for_in_statement" | "for_of_statement" | "while_statement"
+            | "do_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+                builder.exit_scope();
+            }
+
+            // Exception handling
+            "try_statement" => {
+                builder.enter_scope();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+                builder.exit_scope();
+            }
+            "catch_clause" => {
+                builder.add_exception_handler();
+                builder.enter_scope();
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+                builder.exit_scope();
+            }
+
+            // Logical operators
+            "binary_expression" => {
+                // Check for && or ||
+                if let Some(operator) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(operator);
+                    if op_text == "&&" || op_text == "||" {
+                        builder.add_logical_operator();
+                    }
+                }
+                // Process children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+            }
+
+            // Optional chaining adds a path but doesn't add complexity per se
+            "optional_chain_expression" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+            }
+
+            // Nullish coalescing adds a branch-like path
+            // Usually captured as binary_expression with ?? operator
+
+            // Don't recurse into nested functions/arrows - they have their own complexity
+            "function_declaration"
+            | "function_expression"
+            | "arrow_function"
+            | "method_definition" => {
+                // Skip nested functions - they are analyzed separately
+            }
+
+            // All other nodes - recurse into children
+            _ => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.calculate_complexity_recursive(child, builder);
+                }
+            }
         }
     }
 }
@@ -858,5 +1006,190 @@ mod tests {
         let callee_names: Vec<&str> = visitor.calls.iter().map(|c| c.callee.as_str()).collect();
         assert!(callee_names.contains(&"initialize"));
         assert!(callee_names.contains(&"getData"));
+    }
+
+    // ==========================================
+    // Complexity Tests
+    // ==========================================
+
+    #[test]
+    fn test_complexity_simple_function() {
+        use tree_sitter::Parser;
+
+        let source = b"function simple() { return 1; }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1); // Base complexity
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+    }
+
+    #[test]
+    fn test_complexity_with_if_else() {
+        use tree_sitter::Parser;
+
+        let source = b"function check(x: number) { if (x > 0) { return 1; } else { return 0; } }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.branches, 2); // if + else
+        assert!(complexity.cyclomatic_complexity >= 2);
+    }
+
+    #[test]
+    fn test_complexity_with_loops() {
+        use tree_sitter::Parser;
+
+        let source = b"function loop() { for (let i = 0; i < 10; i++) { console.log(i); } while (true) { break; } }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.loops, 2); // for + while
+        assert!(complexity.cyclomatic_complexity >= 3); // 1 + 2 loops
+    }
+
+    #[test]
+    fn test_complexity_with_logical_operators() {
+        use tree_sitter::Parser;
+
+        let source = b"function check(a: boolean, b: boolean, c: boolean) { if (a && b || c) { return true; } return false; }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.logical_operators, 2); // && and ||
+        assert!(complexity.cyclomatic_complexity >= 4); // 1 + 1 branch + 2 logical ops
+    }
+
+    #[test]
+    fn test_complexity_with_try_catch() {
+        use tree_sitter::Parser;
+
+        let source = b"function safe() { try { doSomething(); } catch (e) { console.error(e); } }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.exception_handlers, 1); // catch
+        assert!(complexity.cyclomatic_complexity >= 2);
+    }
+
+    #[test]
+    fn test_complexity_with_switch() {
+        use tree_sitter::Parser;
+
+        let source = b"function grade(score: number) { switch (score) { case 90: return 'A'; case 80: return 'B'; default: return 'C'; } }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.branches, 3); // case 90, case 80, default
+        assert!(complexity.cyclomatic_complexity >= 4);
+    }
+
+    #[test]
+    fn test_complexity_with_ternary() {
+        use tree_sitter::Parser;
+
+        let source = b"function abs(x: number) { return x >= 0 ? x : -x; }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.branches, 1); // ternary
+        assert!(complexity.cyclomatic_complexity >= 2);
+    }
+
+    #[test]
+    fn test_complexity_nesting_depth() {
+        use tree_sitter::Parser;
+
+        let source = b"function nested(x: number) { if (x > 0) { if (x > 10) { if (x > 100) { return 3; } return 2; } return 1; } return 0; }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.max_nesting_depth, 3); // 3 levels of if
+        assert_eq!(complexity.branches, 3); // 3 if statements
+    }
+
+    #[test]
+    fn test_complexity_grade() {
+        use tree_sitter::Parser;
+
+        // Simple function should get grade A
+        let source = b"function simple() { return 1; }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(tree_sitter_typescript::language_typescript())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.grade(), 'A');
     }
 }

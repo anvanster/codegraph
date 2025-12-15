@@ -299,6 +299,7 @@ mod tests {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
+            complexity: None,
         });
 
         let result = ir_to_graph(&ir, &mut graph, Path::new("test.rs"));

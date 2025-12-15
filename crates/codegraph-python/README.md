@@ -6,30 +6,42 @@ Python parser plugin for CodeGraph - extracts code entities and relationships fr
 [![Documentation](https://docs.rs/codegraph-python/badge.svg)](https://docs.rs/codegraph-python)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-## Version 0.2.0 Migration Notice
+## Version 0.3.0 - Cyclomatic Complexity Analysis
 
-**codegraph-python v0.2.0** introduces a unified parser API (`codegraph-parser-api`) for consistency across all language parsers.
+**codegraph-python v0.3.0** adds AST-based cyclomatic complexity calculation for all functions.
 
-### New API (Recommended)
+### Complexity Metrics
+
+Functions now include detailed complexity analysis:
+
 ```rust
 use codegraph_parser_api::CodeParser;
 use codegraph_python::PythonParser;
-use codegraph::CodeGraph;
 
-let mut graph = CodeGraph::in_memory()?;
 let parser = PythonParser::new();
-let info = parser.parse_file(Path::new("example.py"), &mut graph)?;
+let ir = parser.parse_source(source, Path::new("example.py"))?;
+
+for func in &ir.functions {
+    if let Some(complexity) = &func.complexity {
+        println!("{}: CC={} Grade={}",
+            func.name,
+            complexity.cyclomatic_complexity,
+            complexity.grade()  // A, B, C, D, or F
+        );
+        println!("  Branches: {}", complexity.branches);
+        println!("  Loops: {}", complexity.loops);
+        println!("  Logical ops: {}", complexity.logical_operators);
+        println!("  Max nesting: {}", complexity.max_nesting_depth);
+    }
+}
 ```
 
-### Old API (Deprecated, will be removed in v0.3.0)
-```rust
-use codegraph_python::Parser;  // Deprecated
-
-let parser = Parser::new();
-let info = parser.parse_file(path, &mut graph)?;  // Still works with deprecation warning
-```
-
-**Migration Guide:** See [PARSER_TRAIT_MIGRATION.md](PARSER_TRAIT_MIGRATION.md) for details.
+### Grading Scale
+- **A** (1-5): Simple, low risk
+- **B** (6-10): Moderate complexity
+- **C** (11-20): Complex, moderate risk
+- **D** (21-50): Very complex, high risk
+- **F** (51+): Untestable, very high risk
 
 ---
 

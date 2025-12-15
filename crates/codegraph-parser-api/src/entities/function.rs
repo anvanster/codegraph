@@ -1,3 +1,4 @@
+use crate::complexity::ComplexityMetrics;
 use serde::{Deserialize, Serialize};
 
 /// Represents a function parameter
@@ -86,6 +87,9 @@ pub struct FunctionEntity {
 
     /// Parent class (if this is a method)
     pub parent_class: Option<String>,
+
+    /// Complexity metrics for this function
+    pub complexity: Option<ComplexityMetrics>,
 }
 
 impl FunctionEntity {
@@ -106,6 +110,7 @@ impl FunctionEntity {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
+            complexity: None,
         }
     }
 
@@ -163,5 +168,23 @@ impl FunctionEntity {
     pub fn with_parent_class(mut self, parent: impl Into<String>) -> Self {
         self.parent_class = Some(parent.into());
         self
+    }
+
+    pub fn with_complexity(mut self, metrics: ComplexityMetrics) -> Self {
+        self.complexity = Some(metrics);
+        self
+    }
+
+    /// Get the cyclomatic complexity, returning 1 if not calculated
+    pub fn cyclomatic_complexity(&self) -> u32 {
+        self.complexity
+            .as_ref()
+            .map(|c| c.cyclomatic_complexity)
+            .unwrap_or(1)
+    }
+
+    /// Get the complexity grade (A-F), returning 'A' if not calculated
+    pub fn complexity_grade(&self) -> char {
+        self.complexity.as_ref().map(|c| c.grade()).unwrap_or('A')
     }
 }
