@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `codegraph-parser-api` bumped to v0.2.0 (new complexity module)
 - `codegraph-python` bumped to v0.3.0 (complexity integration)
 - `codegraph-typescript` bumped to v0.3.0 (complexity integration)
+- `codegraph-go` bumped to v0.1.2 (compatibility with new FunctionEntity)
+- `codegraph-rust` bumped to v0.1.1 (compatibility with new FunctionEntity)
 - Python builder now uses direct PropertyMap for richer function metadata
 - TypeScript mapper includes complexity properties when available
 
