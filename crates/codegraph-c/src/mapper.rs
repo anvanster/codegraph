@@ -58,10 +58,10 @@ pub fn ir_to_graph(
             .with("name", func.name.clone())
             .with("signature", func.signature.clone())
             .with("visibility", func.visibility.clone())
-            .with("line_start", func.line_start.to_string())
-            .with("line_end", func.line_end.to_string())
-            .with("is_async", func.is_async.to_string())
-            .with("is_static", func.is_static.to_string());
+            .with("line_start", func.line_start as i64)
+            .with("line_end", func.line_end as i64)
+            .with("is_async", func.is_async)
+            .with("is_static", func.is_static);
 
         if let Some(ref doc) = func.doc_comment {
             props = props.with("doc", doc.clone());
@@ -75,19 +75,13 @@ pub fn ir_to_graph(
             props = props
                 .with(
                     "cyclomatic_complexity",
-                    complexity.cyclomatic_complexity.to_string(),
+                    complexity.cyclomatic_complexity as i64,
                 )
                 .with("complexity_grade", complexity.grade().to_string())
-                .with("branches", complexity.branches.to_string())
-                .with("loops", complexity.loops.to_string())
-                .with(
-                    "logical_operators",
-                    complexity.logical_operators.to_string(),
-                )
-                .with(
-                    "max_nesting_depth",
-                    complexity.max_nesting_depth.to_string(),
-                );
+                .with("branches", complexity.branches as i64)
+                .with("loops", complexity.loops as i64)
+                .with("logical_operators", complexity.logical_operators as i64)
+                .with("max_nesting_depth", complexity.max_nesting_depth as i64);
         }
 
         let func_id = graph
@@ -108,9 +102,9 @@ pub fn ir_to_graph(
         let mut props = PropertyMap::new()
             .with("name", class.name.clone())
             .with("visibility", class.visibility.clone())
-            .with("line_start", class.line_start.to_string())
-            .with("line_end", class.line_end.to_string())
-            .with("is_abstract", class.is_abstract.to_string());
+            .with("line_start", class.line_start as i64)
+            .with("line_end", class.line_end as i64)
+            .with("is_abstract", class.is_abstract);
 
         if let Some(ref doc) = class.doc_comment {
             props = props.with("doc", doc.clone());
@@ -142,9 +136,9 @@ pub fn ir_to_graph(
                     field.type_annotation.clone().unwrap_or_default(),
                 )
                 .with("visibility", field.visibility.clone())
-                .with("is_static", field.is_static.to_string())
-                .with("is_constant", field.is_constant.to_string())
-                .with("field_index", idx.to_string());
+                .with("is_static", field.is_static)
+                .with("is_constant", field.is_constant)
+                .with("field_index", idx as i64);
 
             let field_id = graph
                 .add_node(NodeType::Variable, field_props)
@@ -203,8 +197,8 @@ pub fn ir_to_graph(
             (node_map.get(&call.caller), node_map.get(&call.callee))
         {
             let edge_props = PropertyMap::new()
-                .with("call_site_line", call.call_site_line.to_string())
-                .with("is_direct", call.is_direct.to_string());
+                .with("call_site_line", call.call_site_line as i64)
+                .with("is_direct", call.is_direct);
 
             graph
                 .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
@@ -391,7 +385,7 @@ mod tests {
         let func_node = graph.get_node(file_info.functions[0]).unwrap();
         assert_eq!(
             func_node.properties.get("cyclomatic_complexity"),
-            Some(&codegraph::PropertyValue::String("10".to_string()))
+            Some(&codegraph::PropertyValue::Int(10))
         );
         assert_eq!(
             func_node.properties.get("complexity_grade"),

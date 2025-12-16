@@ -74,8 +74,47 @@ fn evaluate_simple_conditionals(source: &str) -> (String, usize) {
     // Each entry is (state, depth)
     let mut state_stack: Vec<ConditionalState> = vec![ConditionalState::Active];
 
-    for line in source.lines() {
+    // Track if we're in a multi-line macro (continuation with backslash)
+    let mut in_multiline_define = false;
+    let mut multiline_define_content = String::new();
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
         let trimmed = line.trim();
+
+        // Handle continuation lines from multi-line #define
+        if in_multiline_define {
+            // Check if this line also ends with backslash
+            let continues = line.trim_end().ends_with('\\');
+            // Append content without the trailing backslash
+            let content = if continues {
+                line.trim_end().trim_end_matches('\\').trim_end()
+            } else {
+                line.trim()
+            };
+            // Escape any internal comments to avoid nested comment issues
+            // Replace /* with /+ and */ with +/
+            let escaped_content = content.replace("/*", "/+").replace("*/", "+/");
+            multiline_define_content.push(' ');
+            multiline_define_content.push_str(&escaped_content);
+
+            if !continues {
+                // End of multi-line define - output as single line comment
+                result.push_str("/* ");
+                result.push_str(&multiline_define_content);
+                result.push_str(" */\n");
+                in_multiline_define = false;
+                multiline_define_content.clear();
+            } else {
+                // Still continuing, just emit empty line to preserve line numbers
+                result.push('\n');
+            }
+            i += 1;
+            continue;
+        }
 
         if let Some(directive) = get_preprocessor_directive(trimmed) {
             match directive {
@@ -117,8 +156,9 @@ fn evaluate_simple_conditionals(source: &str) -> (String, usize) {
                     };
 
                     state_stack.push(new_state);
-                    result.push_str(line);
+                    // Strip the #ifdef/#ifndef line itself (not valid C)
                     result.push('\n');
+                    stripped_count += 1;
                 }
 
                 PreprocessorDirective::Elif(condition) => {
@@ -183,9 +223,26 @@ fn evaluate_simple_conditionals(source: &str) -> (String, usize) {
                     {
                         // Keep directive but it may cause parsing issues
                         // Convert to comment to preserve line numbers
-                        result.push_str("/* ");
-                        result.push_str(trimmed);
-                        result.push_str(" */\n");
+                        // Check if this is a multi-line macro (ends with backslash)
+                        let continues = line.trim_end().ends_with('\\');
+                        if continues {
+                            // Start collecting multi-line define
+                            // Remove trailing backslash from content and escape internal comments
+                            let content = trimmed.trim_end_matches('\\').trim_end();
+                            let escaped = content.replace("/*", "/+").replace("*/", "+/");
+                            multiline_define_content.clear();
+                            multiline_define_content.push_str(&escaped);
+                            in_multiline_define = true;
+                            // Emit empty line to preserve line numbers
+                            result.push('\n');
+                        } else {
+                            // Single-line define - wrap in comment
+                            // Escape any internal comments
+                            let escaped = trimmed.replace("/*", "/+").replace("*/", "+/");
+                            result.push_str("/* ");
+                            result.push_str(&escaped);
+                            result.push_str(" */\n");
+                        }
                     } else {
                         result.push('\n');
                     }
@@ -219,6 +276,7 @@ fn evaluate_simple_conditionals(source: &str) -> (String, usize) {
                 stripped_count += 1;
             }
         }
+        i += 1;
     }
 
     (result, stripped_count)
@@ -453,7 +511,7 @@ int e;
     }
 
     #[test]
-    fn test_ifdef_kept() {
+    fn test_ifdef_content_kept_directive_stripped() {
         let source = r#"#ifdef CONFIG_FOO
 int x;
 #endif
@@ -461,8 +519,10 @@ int x;
         let (result, _count) = evaluate_conditionals(source, ConditionalStrategy::EvaluateSimple);
 
         // #ifdef can't be evaluated without knowing what's defined
-        // So the code should be kept
+        // The code inside should be kept (assume true)
         assert!(result.contains("int x;"));
+        // But the #ifdef directive itself should be stripped (not valid C)
+        assert!(!result.contains("#ifdef"));
     }
 
     #[test]
