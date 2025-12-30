@@ -110,8 +110,13 @@ impl CodeParser for CParser {
         graph: &mut CodeGraph,
     ) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
-        let ir = extractor::extract(source, file_path, &self.config)?;
-        let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
+
+        // Use tolerant mode with kernel code preprocessing for robust parsing
+        // This handles kernel macros, GCC extensions, and partial syntax errors
+        let options = extractor::ExtractionOptions::for_kernel_code();
+        let result = extractor::extract_with_options(source, file_path, &self.config, &options)?;
+
+        let mut file_info = self.ir_to_graph(&result.ir, graph, file_path)?;
 
         file_info.parse_time = start.elapsed();
         file_info.line_count = source.lines().count();

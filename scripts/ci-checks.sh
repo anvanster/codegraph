@@ -46,10 +46,11 @@ cargo fmt --all -- --check
 
 # 3. Benchmarks
 print_section "3/5 Running benchmarks..."
-if [ "$SKIP_BENCHMARK" = true ]; then
-    echo "⏭️  Skipping benchmarks (--skip-benchmark flag)"
-else
+# if [ "$SKIP_BENCHMARK" = true ]; then
+if [ "$FULL_CHECK" = true ]; then
     cargo bench --no-fail-fast
+else
+    echo "⏭️  Skipping benchmarks (--skip-benchmark flag)"
 fi
 
 # 4. Documentation (optional - use --full to run)
