@@ -213,13 +213,47 @@ pub fn ir_to_graph(
     }
 
     // Add call relationships
+    // Track unresolved calls per caller for cross-file resolution
+    let mut unresolved_calls: HashMap<String, Vec<String>> = HashMap::new();
+
     for call in &ir.calls {
-        if let (Some(&caller_id), Some(&callee_id)) =
-            (node_map.get(&call.caller), node_map.get(&call.callee))
-        {
-            graph
-                .add_edge(caller_id, callee_id, EdgeType::Calls, PropertyMap::new())
-                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+        if let Some(&caller_id) = node_map.get(&call.caller) {
+            if let Some(&callee_id) = node_map.get(&call.callee) {
+                // Both caller and callee are in this file - create direct edge
+                graph
+                    .add_edge(caller_id, callee_id, EdgeType::Calls, PropertyMap::new())
+                    .map_err(|e| ParserError::GraphError(e.to_string()))?;
+            } else {
+                // Callee not found in this file - store for cross-file resolution
+                unresolved_calls
+                    .entry(call.caller.clone())
+                    .or_default()
+                    .push(call.callee.clone());
+            }
+        }
+    }
+
+    // Store unresolved calls on caller nodes for post-processing
+    for (caller_name, callees) in unresolved_calls {
+        if let Some(&caller_id) = node_map.get(&caller_name) {
+            if let Ok(node) = graph.get_node(caller_id) {
+                let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
+                let mut all_callees: Vec<&str> = if existing.is_empty() {
+                    Vec::new()
+                } else {
+                    existing.split(',').collect()
+                };
+                for callee in &callees {
+                    if !all_callees.contains(&callee.as_str()) {
+                        all_callees.push(callee);
+                    }
+                }
+                let new_props = node
+                    .properties
+                    .clone()
+                    .with("unresolved_calls", all_callees.join(","));
+                let _ = graph.update_node_properties(caller_id, new_props);
+            }
         }
     }
 

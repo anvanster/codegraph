@@ -3,8 +3,60 @@
 use codegraph::{CodeGraph, EdgeType, NodeId, NodeType, PropertyMap};
 use codegraph_parser_api::{CodeIR, FileInfo, ParserError};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// Resolve a relative import path to an absolute path
+///
+/// Given a file path like `/src/extension.ts` and an import like `./toolManager`,
+/// returns `/src/toolManager` (without extension, as TypeScript imports don't include it)
+fn resolve_import_path(importing_file: &Path, import_path: &str) -> Option<PathBuf> {
+    // Skip external/package imports (don't start with . or /)
+    if !import_path.starts_with('.') && !import_path.starts_with('/') {
+        return None;
+    }
+
+    // Get the directory containing the importing file
+    let parent_dir = importing_file.parent()?;
+
+    // Resolve the relative path
+    let resolved = if let Some(stripped) = import_path.strip_prefix("./") {
+        parent_dir.join(stripped)
+    } else if import_path.starts_with("../") {
+        // Handle parent directory references
+        let mut current = parent_dir.to_path_buf();
+        let mut remaining = import_path;
+        while let Some(rest) = remaining.strip_prefix("../") {
+            current = current.parent()?.to_path_buf();
+            remaining = rest;
+        }
+        current.join(remaining)
+    } else if let Some(stripped) = import_path.strip_prefix('/') {
+        // Absolute path (rare in TypeScript)
+        PathBuf::from(format!("/{stripped}"))
+    } else {
+        return None;
+    };
+
+    Some(resolved)
+}
+
+/// Normalize a path for matching (remove extension, convert to canonical form)
+fn normalize_path_for_matching(path: &Path) -> String {
+    let path_str = path.to_string_lossy();
+    // Remove common TypeScript/JavaScript extensions
+    // Order matters: .d.ts must be checked before .ts
+    let without_ext = if path_str.ends_with(".d.ts") {
+        path_str.trim_end_matches(".d.ts")
+    } else {
+        path_str
+            .trim_end_matches(".ts")
+            .trim_end_matches(".tsx")
+            .trim_end_matches(".js")
+            .trim_end_matches(".jsx")
+    };
+    without_ext.to_string()
+}
 
 /// Convert CodeIR to graph nodes and edges, returning FileInfo
 pub fn ir_to_graph(
@@ -148,24 +200,30 @@ pub fn ir_to_graph(
     for import in &ir.imports {
         let imported_module = &import.imported;
 
-        // Create or get import node
-        let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
-            existing_id
-        } else {
-            let props = PropertyMap::new()
-                .with("name", imported_module.clone())
-                .with("is_external", "true");
+        // Try to resolve relative imports to actual file paths
+        let resolved_path = resolve_import_path(file_path, imported_module);
+        let normalized_resolved = resolved_path
+            .as_ref()
+            .map(|p| normalize_path_for_matching(p));
 
-            let id = graph
-                .add_node(NodeType::Module, props)
-                .map_err(|e| ParserError::GraphError(e.to_string()))?;
-            node_map.insert(imported_module.clone(), id);
-            id
-        };
+        // Check if we can find the target in our node_map by resolved path
+        // This handles the case where we've already parsed the target file
+        let mut target_node_id: Option<NodeId> = None;
 
-        import_ids.push(import_id);
+        if let Some(ref resolved) = normalized_resolved {
+            // Try to find a file node matching the resolved import path
+            // Check node_map for matching file stem
+            let import_file_stem = PathBuf::from(resolved)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string());
 
-        // Create import edge from file to imported module
+            if let Some(ref stem) = import_file_stem {
+                target_node_id = node_map.get(stem).copied();
+            }
+        }
+
+        // Create edge properties
         let mut edge_props = PropertyMap::new();
         if let Some(ref alias) = import.alias {
             edge_props = edge_props.with("alias", alias.clone());
@@ -177,23 +235,110 @@ pub fn ir_to_graph(
             edge_props = edge_props.with("symbols", import.symbols.join(","));
         }
 
-        graph
-            .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
-            .map_err(|e| ParserError::GraphError(e.to_string()))?;
+        // Store resolved path for cross-file resolution
+        if let Some(ref resolved) = normalized_resolved {
+            edge_props = edge_props.with("resolved_path", resolved.clone());
+        }
+
+        // If we have specific imported symbols, create edges to those symbols directly
+        // This enables proper usage tracking for classes, functions, etc.
+        let mut symbols_linked = false;
+        if !import.symbols.is_empty() {
+            for symbol in &import.symbols {
+                // Check if this symbol exists in our node_map
+                if let Some(&symbol_id) = node_map.get(symbol) {
+                    // Create an import edge directly to the symbol
+                    let symbol_edge_props = edge_props
+                        .clone()
+                        .with("imported_symbol", symbol.clone())
+                        .with("source_module", imported_module.clone());
+
+                    graph
+                        .add_edge(file_id, symbol_id, EdgeType::Imports, symbol_edge_props)
+                        .map_err(|e| ParserError::GraphError(e.to_string()))?;
+                    symbols_linked = true;
+                }
+            }
+        }
+
+        // Also create edge to the module/file node (for module-level tracking)
+        let import_id = if let Some(id) = target_node_id {
+            id
+        } else if let Some(&existing_id) = node_map.get(imported_module) {
+            existing_id
+        } else {
+            // Create a placeholder module node for unresolved/external imports
+            let is_external = resolved_path.is_none();
+            let props = PropertyMap::new()
+                .with("name", imported_module.clone())
+                .with("is_external", is_external.to_string());
+
+            let id = graph
+                .add_node(NodeType::Module, props)
+                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+            node_map.insert(imported_module.clone(), id);
+            id
+        };
+
+        import_ids.push(import_id);
+
+        // Create import edge from file to imported module
+        // (only if we didn't already link to individual symbols, or if no symbols specified)
+        if !symbols_linked || import.symbols.is_empty() {
+            graph
+                .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
+                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+        }
     }
 
     // Add call relationships
-    for call in &ir.calls {
-        if let (Some(&caller_id), Some(&callee_id)) =
-            (node_map.get(&call.caller), node_map.get(&call.callee))
-        {
-            let edge_props = PropertyMap::new()
-                .with("call_site_line", call.call_site_line.to_string())
-                .with("is_direct", call.is_direct.to_string());
+    // Track unresolved calls per caller for cross-file resolution
+    let mut unresolved_calls: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
 
-            graph
-                .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
-                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+    for call in &ir.calls {
+        if let Some(&caller_id) = node_map.get(&call.caller) {
+            if let Some(&callee_id) = node_map.get(&call.callee) {
+                // Both caller and callee are in this file - create direct edge
+                let edge_props = PropertyMap::new()
+                    .with("call_site_line", call.call_site_line.to_string())
+                    .with("is_direct", call.is_direct.to_string());
+
+                graph
+                    .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
+                    .map_err(|e| ParserError::GraphError(e.to_string()))?;
+            } else {
+                // Callee not found in this file - store for cross-file resolution
+                unresolved_calls
+                    .entry(call.caller.clone())
+                    .or_default()
+                    .push(call.callee.clone());
+            }
+        }
+    }
+
+    // Store unresolved calls on caller nodes for post-processing
+    for (caller_name, callees) in unresolved_calls {
+        if let Some(&caller_id) = node_map.get(&caller_name) {
+            if let Ok(node) = graph.get_node(caller_id) {
+                // Get existing unresolved_calls or create new
+                let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
+                let mut all_callees: Vec<&str> = if existing.is_empty() {
+                    Vec::new()
+                } else {
+                    existing.split(',').collect()
+                };
+                for callee in &callees {
+                    if !all_callees.contains(&callee.as_str()) {
+                        all_callees.push(callee);
+                    }
+                }
+                let new_props = node
+                    .properties
+                    .clone()
+                    .with("unresolved_calls", all_callees.join(","));
+                let _ = graph.update_node_properties(caller_id, new_props);
+            }
         }
     }
 
@@ -486,6 +631,312 @@ mod tests {
             edge.edge_type,
             EdgeType::Implements,
             "Edge should be of type Implements"
+        );
+    }
+
+    // ==========================================
+    // Import Path Resolution Tests
+    // ==========================================
+
+    #[test]
+    fn test_resolve_import_path_relative_same_dir() {
+        let file_path = PathBuf::from("/src/extension.ts");
+        let result = resolve_import_path(&file_path, "./toolManager");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), PathBuf::from("/src/toolManager"));
+    }
+
+    #[test]
+    fn test_resolve_import_path_relative_subdir() {
+        let file_path = PathBuf::from("/src/extension.ts");
+        let result = resolve_import_path(&file_path, "./ai/toolManager");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), PathBuf::from("/src/ai/toolManager"));
+    }
+
+    #[test]
+    fn test_resolve_import_path_parent_dir() {
+        let file_path = PathBuf::from("/src/ai/toolManager.ts");
+        let result = resolve_import_path(&file_path, "../extension");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), PathBuf::from("/src/extension"));
+    }
+
+    #[test]
+    fn test_resolve_import_path_multiple_parent_dirs() {
+        let file_path = PathBuf::from("/src/ai/tools/manager.ts");
+        let result = resolve_import_path(&file_path, "../../extension");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), PathBuf::from("/src/extension"));
+    }
+
+    #[test]
+    fn test_resolve_import_path_external_package() {
+        let file_path = PathBuf::from("/src/extension.ts");
+        let result = resolve_import_path(&file_path, "vscode");
+        assert!(result.is_none(), "External packages should return None");
+    }
+
+    #[test]
+    fn test_resolve_import_path_scoped_package() {
+        let file_path = PathBuf::from("/src/extension.ts");
+        let result = resolve_import_path(&file_path, "@types/node");
+        assert!(result.is_none(), "Scoped packages should return None");
+    }
+
+    #[test]
+    fn test_normalize_path_removes_ts_extension() {
+        let path = PathBuf::from("/src/toolManager.ts");
+        assert_eq!(normalize_path_for_matching(&path), "/src/toolManager");
+    }
+
+    #[test]
+    fn test_normalize_path_removes_tsx_extension() {
+        let path = PathBuf::from("/src/Component.tsx");
+        assert_eq!(normalize_path_for_matching(&path), "/src/Component");
+    }
+
+    #[test]
+    fn test_normalize_path_removes_dts_extension() {
+        let path = PathBuf::from("/types/index.d.ts");
+        assert_eq!(normalize_path_for_matching(&path), "/types/index");
+    }
+
+    #[test]
+    fn test_normalize_path_no_extension() {
+        let path = PathBuf::from("/src/toolManager");
+        assert_eq!(normalize_path_for_matching(&path), "/src/toolManager");
+    }
+
+    // ==========================================
+    // Import Edge to Symbol Tests
+    // ==========================================
+
+    #[test]
+    fn test_import_creates_edge_to_symbol() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::ImportRelation;
+
+        // Simulate: extension.ts imports { MyClass } from './module'
+        // where MyClass is defined in the same file (for testing purposes)
+        let mut ir = CodeIR::new(PathBuf::from("/src/extension.ts"));
+
+        // Add the class that will be "imported"
+        ir.add_class(ClassEntity::new("MyClass", 10, 20));
+
+        // Add the import referencing that class
+        ir.add_import(
+            ImportRelation::new("/src/extension.ts", "./module")
+                .with_symbols(vec!["MyClass".to_string()]),
+        );
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(
+            &ir,
+            &mut graph,
+            PathBuf::from("/src/extension.ts").as_path(),
+        );
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+
+        // Get the class node
+        let class_id = file_info.classes[0];
+
+        // Verify there's an import edge from file to the class
+        let edges = graph
+            .get_edges_between(file_info.file_id, class_id)
+            .unwrap();
+
+        let import_edges: Vec<_> = edges
+            .iter()
+            .filter_map(|e| graph.get_edge(*e).ok())
+            .filter(|e| e.edge_type == EdgeType::Imports)
+            .collect();
+
+        assert!(
+            !import_edges.is_empty(),
+            "Should have import edge from file to the imported class"
+        );
+
+        // Verify edge has the imported_symbol property
+        let edge = &import_edges[0];
+        assert_eq!(
+            edge.properties.get_string("imported_symbol"),
+            Some("MyClass")
+        );
+    }
+
+    #[test]
+    fn test_import_creates_edge_to_function() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::ImportRelation;
+
+        // Simulate: extension.ts imports { myFunction } from './utils'
+        let mut ir = CodeIR::new(PathBuf::from("/src/extension.ts"));
+
+        // Add the function that will be "imported"
+        ir.add_function(FunctionEntity::new("myFunction", 5, 15));
+
+        // Add the import referencing that function
+        ir.add_import(
+            ImportRelation::new("/src/extension.ts", "./utils")
+                .with_symbols(vec!["myFunction".to_string()]),
+        );
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(
+            &ir,
+            &mut graph,
+            PathBuf::from("/src/extension.ts").as_path(),
+        );
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+
+        // Get the function node
+        let func_id = file_info.functions[0];
+
+        // Verify there's an import edge from file to the function
+        let edges = graph.get_edges_between(file_info.file_id, func_id).unwrap();
+
+        let import_edges: Vec<_> = edges
+            .iter()
+            .filter_map(|e| graph.get_edge(*e).ok())
+            .filter(|e| e.edge_type == EdgeType::Imports)
+            .collect();
+
+        assert!(
+            !import_edges.is_empty(),
+            "Should have import edge from file to the imported function"
+        );
+    }
+
+    #[test]
+    fn test_import_multiple_symbols_creates_multiple_edges() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::ImportRelation;
+
+        // Simulate: extension.ts imports { ClassA, ClassB } from './module'
+        let mut ir = CodeIR::new(PathBuf::from("/src/extension.ts"));
+
+        // Add both classes
+        ir.add_class(ClassEntity::new("ClassA", 10, 20));
+        ir.add_class(ClassEntity::new("ClassB", 25, 35));
+
+        // Add the import with both symbols
+        ir.add_import(
+            ImportRelation::new("/src/extension.ts", "./module")
+                .with_symbols(vec!["ClassA".to_string(), "ClassB".to_string()]),
+        );
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(
+            &ir,
+            &mut graph,
+            PathBuf::from("/src/extension.ts").as_path(),
+        );
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+
+        // Verify both classes have import edges
+        for class_id in &file_info.classes {
+            let edges = graph
+                .get_edges_between(file_info.file_id, *class_id)
+                .unwrap();
+
+            let import_edges: Vec<_> = edges
+                .iter()
+                .filter_map(|e| graph.get_edge(*e).ok())
+                .filter(|e| e.edge_type == EdgeType::Imports)
+                .collect();
+
+            assert!(
+                !import_edges.is_empty(),
+                "Each imported class should have an import edge"
+            );
+        }
+    }
+
+    #[test]
+    fn test_external_import_creates_module_node() {
+        use codegraph_parser_api::ImportRelation;
+
+        // Simulate: extension.ts imports { useState } from 'react'
+        let mut ir = CodeIR::new(PathBuf::from("/src/extension.ts"));
+
+        ir.add_import(
+            ImportRelation::new("/src/extension.ts", "react")
+                .with_symbols(vec!["useState".to_string()]),
+        );
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(
+            &ir,
+            &mut graph,
+            PathBuf::from("/src/extension.ts").as_path(),
+        );
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+
+        // Verify a module node was created for 'react'
+        assert_eq!(file_info.imports.len(), 1);
+
+        let import_node = graph.get_node(file_info.imports[0]).unwrap();
+        assert_eq!(import_node.node_type, NodeType::Module);
+        assert_eq!(import_node.properties.get_string("name"), Some("react"));
+        assert_eq!(
+            import_node.properties.get_string("is_external"),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn test_import_stores_resolved_path() {
+        use codegraph::{Direction, EdgeType};
+        use codegraph_parser_api::ImportRelation;
+
+        // Simulate: extension.ts imports { Tool } from './ai/tools'
+        let mut ir = CodeIR::new(PathBuf::from("/src/extension.ts"));
+
+        ir.add_import(ImportRelation::new("/src/extension.ts", "./ai/tools"));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(
+            &ir,
+            &mut graph,
+            PathBuf::from("/src/extension.ts").as_path(),
+        );
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+
+        // Get the import edge and verify it has resolved_path
+        let neighbors = graph
+            .get_neighbors(file_info.file_id, Direction::Outgoing)
+            .unwrap();
+
+        let mut found_resolved_path = false;
+        for neighbor_id in &neighbors {
+            let edges = graph
+                .get_edges_between(file_info.file_id, *neighbor_id)
+                .unwrap();
+            for edge_id in edges {
+                let edge = graph.get_edge(edge_id).unwrap();
+                if edge.edge_type == EdgeType::Imports {
+                    if let Some(resolved) = edge.properties.get_string("resolved_path") {
+                        assert!(resolved.contains("ai/tools"));
+                        found_resolved_path = true;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found_resolved_path,
+            "Import edge should have resolved_path property for relative imports"
         );
     }
 }

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Cross-File Call Resolution (All Parsers)
+- All parsers now track unresolved cross-file function calls
+- Unresolved callee names stored in `unresolved_calls` node property for post-processing
+- Enables proper unused code detection across file boundaries
+- Version bumps: TypeScript v0.3.1, Python v0.3.1, Rust v0.1.2, Go v0.1.3, C v0.1.2
+
 #### Cyclomatic Complexity Analysis (`codegraph-parser-api` v0.2.0)
 - New `ComplexityMetrics` struct for comprehensive complexity analysis
 - `ComplexityBuilder` for incremental complexity tracking during AST traversal
