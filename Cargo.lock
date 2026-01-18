@@ -234,6 +234,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "codegraph-csharp"
+version = "0.1.0"
+dependencies = [
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter 0.22.6",
+ "tree-sitter-c-sharp",
+]
+
+[[package]]
 name = "codegraph-go"
 version = "0.1.3"
 dependencies = [
@@ -247,6 +263,38 @@ dependencies = [
  "thiserror",
  "tree-sitter 0.20.10",
  "tree-sitter-go",
+]
+
+[[package]]
+name = "codegraph-java"
+version = "0.1.0"
+dependencies = [
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter 0.22.6",
+ "tree-sitter-java",
+]
+
+[[package]]
+name = "codegraph-kotlin"
+version = "0.1.0"
+dependencies = [
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter 0.22.6",
+ "tree-sitter-kotlin",
 ]
 
 [[package]]
@@ -291,6 +339,22 @@ dependencies = [
  "thiserror",
  "tracing",
  "walkdir",
+]
+
+[[package]]
+name = "codegraph-ruby"
+version = "0.1.0"
+dependencies = [
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter 0.22.6",
+ "tree-sitter-ruby",
 ]
 
 [[package]]
@@ -1285,6 +1349,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-c-sharp"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8997ad04502208449025114e434c9024a33a74e700513c702a9d2cac6522a771"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
+]
+
+[[package]]
 name = "tree-sitter-go"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1295,10 +1369,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-java"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33bc21adf831a773c075d9d00107ab43965e6a6ea7607b47fd9ec6f3db4b481b"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
+]
+
+[[package]]
+name = "tree-sitter-kotlin"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ff60aeb036f5762515ceb31404512ea4f9599764bcd3857074bb82867bdd34"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
+]
+
+[[package]]
 name = "tree-sitter-php"
 version = "0.22.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1be890bd043986cc26b69968698e508dbd40060805e482f226dc873a63a88d60"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
+]
+
+[[package]]
+name = "tree-sitter-ruby"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0031f687c0772f2dad7b77104c43428611099a1804c81244ada21560f41f0b1"
 dependencies = [
  "cc",
  "tree-sitter 0.22.6",

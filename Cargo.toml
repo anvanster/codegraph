@@ -10,6 +10,10 @@ members = [
     "crates/codegraph-go",
     "crates/codegraph-c",
     "crates/codegraph-php",
+    "crates/codegraph-java",
+    "crates/codegraph-kotlin",
+    "crates/codegraph-ruby",
+    "crates/codegraph-csharp",
 ]
 
 [workspace.package]
