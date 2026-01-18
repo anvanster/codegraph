@@ -229,7 +229,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "tree-sitter",
+ "tree-sitter 0.20.10",
  "tree-sitter-c",
 ]
 
@@ -245,7 +245,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "tree-sitter",
+ "tree-sitter 0.20.10",
  "tree-sitter-go",
 ]
 
@@ -257,6 +257,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "codegraph-php"
+version = "0.1.0"
+dependencies = [
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter 0.22.6",
+ "tree-sitter-php",
 ]
 
 [[package]]
@@ -306,7 +322,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "tree-sitter",
+ "tree-sitter 0.20.10",
  "tree-sitter-typescript",
 ]
 
@@ -1249,13 +1265,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter"
+version = "0.22.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df7cc499ceadd4dcdf7ec6d4cbc34ece92c3fa07821e287aedecd4416c516dca"
+dependencies = [
+ "cc",
+ "regex",
+]
+
+[[package]]
 name = "tree-sitter-c"
 version = "0.20.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4bbd5f3d8658c08581f8f2adac6c391c2e9fa00fe9246bf6c5f52213b9cc6b72"
 dependencies = [
  "cc",
- "tree-sitter",
+ "tree-sitter 0.20.10",
 ]
 
 [[package]]
@@ -1265,7 +1291,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad6d11f19441b961af2fda7f12f5d0dac325f6d6de83836a1d3750018cc5114"
 dependencies = [
  "cc",
- "tree-sitter",
+ "tree-sitter 0.20.10",
+]
+
+[[package]]
+name = "tree-sitter-php"
+version = "0.22.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1be890bd043986cc26b69968698e508dbd40060805e482f226dc873a63a88d60"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
 ]
 
 [[package]]
@@ -1275,7 +1311,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8bc1d2c24276a48ef097a71b56888ac9db63717e8f8d0b324668a27fd619670"
 dependencies = [
  "cc",
- "tree-sitter",
+ "tree-sitter 0.20.10",
 ]
 
 [[package]]

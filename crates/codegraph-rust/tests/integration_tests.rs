@@ -339,8 +339,7 @@ fn test_parse_comments_only() {
     let result = parser.parse_source(source, Path::new("test.rs"), &mut graph);
     // Note: Comments-only files may not parse as valid Rust without a module item
     // This is expected behavior
-    if result.is_ok() {
-        let info = result.unwrap();
+    if let Ok(info) = result {
         assert_eq!(info.functions.len(), 0);
         assert_eq!(info.classes.len(), 0);
     }

@@ -9,6 +9,7 @@ members = [
     "crates/codegraph-typescript",
     "crates/codegraph-go",
     "crates/codegraph-c",
+    "crates/codegraph-php",
 ]
 
 [workspace.package]

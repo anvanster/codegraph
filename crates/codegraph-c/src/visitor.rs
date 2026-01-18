@@ -696,7 +696,7 @@ mod tests {
     use super::*;
     use tree_sitter::Parser;
 
-    fn parse_and_visit(source: &[u8]) -> CVisitor {
+    fn parse_and_visit(source: &[u8]) -> CVisitor<'_> {
         let mut parser = Parser::new();
         parser.set_language(tree_sitter_c::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
