@@ -392,6 +392,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "codegraph-swift"
+version = "0.1.0"
+dependencies = [
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter 0.22.6",
+ "tree-sitter-swift",
+]
+
+[[package]]
 name = "codegraph-typescript"
 version = "0.3.1"
 dependencies = [
@@ -1436,6 +1452,16 @@ name = "tree-sitter-ruby"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0031f687c0772f2dad7b77104c43428611099a1804c81244ada21560f41f0b1"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
+]
+
+[[package]]
+name = "tree-sitter-swift"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75fd4af840121c5add7a20372be867c04fc398edf3edb2c64286b56f2da28c43"
 dependencies = [
  "cc",
  "tree-sitter 0.22.6",

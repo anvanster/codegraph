@@ -15,6 +15,7 @@ members = [
     "crates/codegraph-ruby",
     "crates/codegraph-csharp",
     "crates/codegraph-cpp",
+    "crates/codegraph-swift",
 ]
 
 [workspace.package]
