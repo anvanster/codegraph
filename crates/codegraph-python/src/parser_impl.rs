@@ -163,34 +163,16 @@ impl PythonParser {
                 .add_edge(file_id, class_id, EdgeType::Contains, PropertyMap::new())
                 .map_err(|e| ParserError::GraphError(e.to_string()))?;
 
-            // Add methods
+            // Methods are already added via ir.functions with parent_class set
+            // Just create edges from class to its methods
             for method in &class.methods {
-                let method_name = format!("{}.{}", class.name, method.name);
-                let mut method_props = PropertyMap::new()
-                    .with("name", method_name.clone())
-                    .with("path", file_path.display().to_string())
-                    .with("signature", method.signature.clone())
-                    .with("visibility", method.visibility.clone())
-                    .with("line_start", method.line_start.to_string())
-                    .with("line_end", method.line_end.to_string())
-                    .with("is_method", "true")
-                    .with("parent_class", class.name.clone());
-
-                if let Some(ref doc) = method.doc_comment {
-                    method_props = method_props.with("doc", doc.clone());
+                let method_name = method.name.clone();
+                if let Some(&method_id) = node_map.get(&method_name) {
+                    // Link method to class
+                    graph
+                        .add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
+                        .map_err(|e| ParserError::GraphError(e.to_string()))?;
                 }
-
-                let method_id = graph
-                    .add_node(NodeType::Function, method_props)
-                    .map_err(|e| ParserError::GraphError(e.to_string()))?;
-
-                node_map.insert(method_name, method_id);
-                function_ids.push(method_id);
-
-                // Link method to class
-                graph
-                    .add_edge(class_id, method_id, EdgeType::Contains, PropertyMap::new())
-                    .map_err(|e| ParserError::GraphError(e.to_string()))?;
             }
         }
 

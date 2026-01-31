@@ -1,20 +1,17 @@
-//! AST visitor for extracting Rust entities
+//! AST visitor for extracting Rust entities using tree-sitter
 //!
-//! This module implements a syn visitor that walks the Rust AST and extracts
-//! functions, structs, enums, traits, and their relationships.
+//! This module implements a tree-sitter based visitor that walks the Rust AST
+//! and extracts functions, structs, enums, traits, and their relationships.
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, Field, FunctionEntity, ImplementationRelation, ImportRelation,
     InheritanceRelation, Parameter, ParserConfig, TraitEntity,
 };
-use syn::visit::Visit;
-use syn::{
-    Attribute, FnArg, GenericParam, ImplItem, ItemEnum, ItemFn, ItemImpl, ItemStruct, ItemTrait,
-    ItemUse, Pat, ReturnType, Signature, TraitItem, Type, Visibility,
-};
+use tree_sitter::Node;
 
 /// Visitor that extracts entities and relationships from Rust AST
-pub struct RustVisitor {
+pub struct RustVisitor<'a> {
+    pub source: &'a [u8],
     pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
@@ -26,9 +23,10 @@ pub struct RustVisitor {
     current_class: Option<String>,
 }
 
-impl RustVisitor {
-    pub fn new(config: ParserConfig) -> Self {
+impl<'a> RustVisitor<'a> {
+    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
         Self {
+            source,
             config,
             functions: Vec::new(),
             classes: Vec::new(),
@@ -41,37 +39,131 @@ impl RustVisitor {
         }
     }
 
-    /// Extract visibility string from syn::Visibility
-    fn extract_visibility(vis: &Visibility) -> String {
-        match vis {
-            Visibility::Public(_) => "public".to_string(),
-            Visibility::Restricted(r) => {
-                if r.path.is_ident("crate") {
-                    "internal".to_string()
-                } else if r.path.is_ident("super") {
-                    "protected".to_string()
-                } else {
-                    "restricted".to_string()
+    /// Get text from a node
+    fn node_text(&self, node: Node) -> String {
+        node.utf8_text(self.source).unwrap_or("").to_string()
+    }
+
+    /// Main visitor entry point
+    pub fn visit_node(&mut self, node: Node) {
+        match node.kind() {
+            "function_item" => {
+                // Only visit top-level functions (not inside impl/trait blocks)
+                if self.current_class.is_none() {
+                    self.visit_function(node);
                 }
             }
-            Visibility::Inherited => "private".to_string(),
+            "struct_item" => self.visit_struct(node),
+            "enum_item" => self.visit_enum(node),
+            "trait_item" => {
+                self.visit_trait(node);
+                // Don't recurse into trait body - methods already extracted
+                return;
+            }
+            "impl_item" => {
+                self.visit_impl(node);
+                // Don't recurse into impl body - methods already extracted
+                return;
+            }
+            "use_declaration" => self.visit_use(node),
+            _ => {}
+        }
+
+        // Recursively visit children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_node(child);
         }
     }
 
-    /// Extract documentation from attributes
-    fn extract_doc(attrs: &[Attribute]) -> Option<String> {
-        let mut docs = Vec::new();
-        for attr in attrs {
-            if attr.path().is_ident("doc") {
-                if let Ok(meta) = attr.meta.require_name_value() {
-                    if let syn::Expr::Lit(expr_lit) = &meta.value {
-                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                            docs.push(lit_str.value().trim().to_string());
-                        }
-                    }
+    /// Extract visibility from a visibility_modifier node
+    fn extract_visibility(&self, node: Node) -> String {
+        // Look for visibility_modifier child
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "visibility_modifier" {
+                let text = self.node_text(child);
+                if text.starts_with("pub(crate)") {
+                    return "internal".to_string();
+                } else if text.starts_with("pub(super)") {
+                    return "protected".to_string();
+                } else if text.starts_with("pub") {
+                    return "public".to_string();
                 }
             }
         }
+        "private".to_string()
+    }
+
+    /// Check if a function has the #[test] attribute
+    fn has_test_attribute(&self, node: Node) -> bool {
+        // First, check for attributes as previous siblings (e.g., #[test] before fn)
+        let mut current = node;
+        while let Some(prev) = current.prev_sibling() {
+            if prev.kind() == "attribute_item" {
+                let attr_text = self.node_text(prev);
+                if attr_text.contains("test") {
+                    return true;
+                }
+            } else {
+                // Stop when we hit a non-attribute node
+                break;
+            }
+            current = prev;
+        }
+
+        // Also check children (for inner attributes)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "attribute_item" || child.kind() == "attribute" {
+                let attr_text = self.node_text(child);
+                if attr_text.contains("test") {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if function has async keyword
+    fn is_async(&self, node: Node) -> bool {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "async" || self.node_text(child) == "async" {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Extract doc comments (/// or //!) from preceding nodes
+    fn extract_doc_comment(&self, node: Node) -> Option<String> {
+        let mut docs = Vec::new();
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == "attribute_item" {
+                let text = self.node_text(child);
+                // Check for #[doc = "..."] style attributes
+                if text.contains("doc") {
+                    if let Some(start) = text.find('"') {
+                        if let Some(end) = text.rfind('"') {
+                            if start < end {
+                                docs.push(text[start + 1..end].to_string());
+                            }
+                        }
+                    }
+                }
+            } else if child.kind() == "line_comment" {
+                let text = self.node_text(child);
+                if text.starts_with("///") {
+                    docs.push(text[3..].trim().to_string());
+                } else if text.starts_with("//!") {
+                    docs.push(text[3..].trim().to_string());
+                }
+            }
+        }
+
         if docs.is_empty() {
             None
         } else {
@@ -79,86 +171,98 @@ impl RustVisitor {
         }
     }
 
-    /// Extract parameters from function signature
-    fn extract_parameters(sig: &Signature) -> Vec<Parameter> {
-        sig.inputs
-            .iter()
-            .map(|arg| match arg {
-                FnArg::Receiver(_) => Parameter {
-                    name: "self".to_string(),
-                    type_annotation: Some("Self".to_string()),
-                    default_value: None,
-                    is_variadic: false,
-                },
-                FnArg::Typed(pat_type) => {
-                    let name = if let Pat::Ident(ident) = &*pat_type.pat {
-                        ident.ident.to_string()
-                    } else {
-                        "unknown".to_string()
-                    };
+    /// Extract parameters from a function's parameter list
+    fn extract_parameters(&self, node: Node) -> Vec<Parameter> {
+        let mut params = Vec::new();
 
-                    let type_annotation = quote::quote!(#pat_type.ty).to_string();
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            for child in params_node.children(&mut cursor) {
+                match child.kind() {
+                    "self_parameter" => {
+                        params.push(Parameter {
+                            name: "self".to_string(),
+                            type_annotation: Some("Self".to_string()),
+                            default_value: None,
+                            is_variadic: false,
+                        });
+                    }
+                    "parameter" => {
+                        let name = child
+                            .child_by_field_name("pattern")
+                            .map(|n| self.node_text(n))
+                            .unwrap_or_else(|| "unknown".to_string());
 
-                    Parameter {
-                        name,
-                        type_annotation: Some(type_annotation),
-                        default_value: None,
-                        is_variadic: false,
+                        let type_annotation = child
+                            .child_by_field_name("type")
+                            .map(|n| self.node_text(n));
+
+                        params.push(Parameter {
+                            name,
+                            type_annotation,
+                            default_value: None,
+                            is_variadic: false,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        params
+    }
+
+    /// Extract return type from function signature
+    fn extract_return_type(&self, node: Node) -> Option<String> {
+        node.child_by_field_name("return_type")
+            .map(|n| self.node_text(n).trim_start_matches("->").trim().to_string())
+    }
+
+    /// Extract the first line as signature
+    fn extract_signature(&self, node: Node) -> String {
+        self.node_text(node)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    /// Extract type parameters from generics
+    fn extract_type_parameters(&self, node: Node) -> Vec<String> {
+        let mut params = Vec::new();
+
+        if let Some(type_params) = node.child_by_field_name("type_parameters") {
+            let mut cursor = type_params.walk();
+            for child in type_params.children(&mut cursor) {
+                if child.kind() == "type_identifier" {
+                    params.push(self.node_text(child));
+                } else if child.kind() == "constrained_type_parameter" {
+                    // Get just the type name from T: Trait
+                    if let Some(name) = child.child_by_field_name("left") {
+                        params.push(self.node_text(name));
                     }
                 }
-            })
-            .collect()
-    }
-
-    /// Extract return type from signature
-    fn extract_return_type(sig: &Signature) -> Option<String> {
-        match &sig.output {
-            ReturnType::Default => None,
-            ReturnType::Type(_, ty) => Some(quote::quote!(#ty).to_string()),
+            }
         }
+
+        params
     }
 
-    /// Check if function is async
-    fn is_async(sig: &Signature) -> bool {
-        sig.asyncness.is_some()
-    }
+    /// Visit a function declaration
+    fn visit_function(&mut self, node: Node) {
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "anonymous".to_string());
 
-    /// Check if function is a test
-    fn is_test(attrs: &[Attribute]) -> bool {
-        attrs.iter().any(|attr| attr.path().is_ident("test"))
-    }
-
-    /// Extract generic type parameters
-    fn extract_type_parameters(generics: &syn::Generics) -> Vec<String> {
-        generics
-            .params
-            .iter()
-            .filter_map(|param| {
-                if let GenericParam::Type(type_param) = param {
-                    Some(type_param.ident.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-}
-
-impl<'ast> Visit<'ast> for RustVisitor {
-    fn visit_item_fn(&mut self, node: &'ast ItemFn) {
-        let vis = Self::extract_visibility(&node.vis);
-        let name = node.sig.ident.to_string();
-        let signature = quote::quote!(#node.sig).to_string();
-        let doc = Self::extract_doc(&node.attrs);
-        let parameters = Self::extract_parameters(&node.sig);
-        let return_type = Self::extract_return_type(&node.sig);
-        let is_async = Self::is_async(&node.sig);
-        let is_test = Self::is_test(&node.attrs);
+        let visibility = self.extract_visibility(node);
 
         // Skip private functions if configured
-        if self.config.skip_private && vis == "private" {
+        if self.config.skip_private && visibility == "private" {
             return;
         }
+
+        let is_test = self.has_test_attribute(node);
 
         // Skip test functions if configured
         if self.config.skip_tests && is_test {
@@ -167,213 +271,210 @@ impl<'ast> Visit<'ast> for RustVisitor {
 
         let func = FunctionEntity {
             name: name.clone(),
-            signature,
-            visibility: vis,
-            line_start: 0, // syn doesn't provide line numbers easily
-            line_end: 0,
-            is_async,
+            signature: self.extract_signature(node),
+            visibility,
+            line_start: node.start_position().row + 1,
+            line_end: node.end_position().row + 1,
+            is_async: self.is_async(node),
             is_test,
             is_static: false,
             is_abstract: false,
-            parameters,
-            return_type,
-            doc_comment: doc,
+            parameters: self.extract_parameters(node),
+            return_type: self.extract_return_type(node),
+            doc_comment: self.extract_doc_comment(node),
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
             complexity: None,
         };
 
         self.functions.push(func);
-
-        // Continue visiting the function body for calls
-        syn::visit::visit_item_fn(self, node);
     }
 
-    fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
-        let vis = Self::extract_visibility(&node.vis);
-        let name = node.ident.to_string();
-        let doc = Self::extract_doc(&node.attrs);
+    /// Visit a struct declaration
+    fn visit_struct(&mut self, node: Node) {
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "Struct".to_string());
+
+        let visibility = self.extract_visibility(node);
 
         // Skip private structs if configured
-        if self.config.skip_private && vis == "private" {
+        if self.config.skip_private && visibility == "private" {
             return;
         }
 
-        // Extract fields
-        let fields = node
-            .fields
-            .iter()
-            .map(|f| {
-                let field_name = f
-                    .ident
-                    .as_ref()
-                    .map(|i| i.to_string())
-                    .unwrap_or_else(|| "unnamed".to_string());
-                let field_vis = Self::extract_visibility(&f.vis);
-                let type_annotation = quote::quote!(#f.ty).to_string();
+        // Extract fields from field_declaration_list
+        let mut fields = Vec::new();
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                if child.kind() == "field_declaration" {
+                    let field_name = child
+                        .child_by_field_name("name")
+                        .map(|n| self.node_text(n))
+                        .unwrap_or_else(|| "unnamed".to_string());
 
-                Field {
-                    name: field_name,
-                    type_annotation: Some(type_annotation),
-                    visibility: field_vis,
-                    is_static: false,
-                    is_constant: false,
-                    default_value: None,
+                    let field_type = child
+                        .child_by_field_name("type")
+                        .map(|n| self.node_text(n));
+
+                    let field_vis = self.extract_visibility(child);
+
+                    fields.push(Field {
+                        name: field_name,
+                        type_annotation: field_type,
+                        visibility: field_vis,
+                        is_static: false,
+                        is_constant: false,
+                        default_value: None,
+                    });
                 }
-            })
-            .collect();
-
-        let type_parameters = Self::extract_type_parameters(&node.generics);
+            }
+        }
 
         let class = ClassEntity {
             name: name.clone(),
-            visibility: vis,
-            line_start: 0,
-            line_end: 0,
+            visibility,
+            line_start: node.start_position().row + 1,
+            line_end: node.end_position().row + 1,
             is_abstract: false,
             is_interface: false,
             base_classes: Vec::new(),
             implemented_traits: Vec::new(),
             methods: Vec::new(),
             fields,
-            doc_comment: doc,
+            doc_comment: self.extract_doc_comment(node),
             attributes: Vec::new(),
-            type_parameters,
+            type_parameters: self.extract_type_parameters(node),
         };
 
         self.classes.push(class);
-
-        syn::visit::visit_item_struct(self, node);
     }
 
-    fn visit_item_enum(&mut self, node: &'ast ItemEnum) {
-        let vis = Self::extract_visibility(&node.vis);
-        let name = node.ident.to_string();
-        let doc = Self::extract_doc(&node.attrs);
+    /// Visit an enum declaration
+    fn visit_enum(&mut self, node: Node) {
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "Enum".to_string());
+
+        let visibility = self.extract_visibility(node);
 
         // Skip private enums if configured
-        if self.config.skip_private && vis == "private" {
+        if self.config.skip_private && visibility == "private" {
             return;
         }
 
-        // Treat enums as classes in the graph
-        let type_parameters = Self::extract_type_parameters(&node.generics);
-
+        // Treat enums as classes with an "enum" attribute
         let class = ClassEntity {
             name: name.clone(),
-            visibility: vis,
-            line_start: 0,
-            line_end: 0,
+            visibility,
+            line_start: node.start_position().row + 1,
+            line_end: node.end_position().row + 1,
             is_abstract: false,
             is_interface: false,
             base_classes: Vec::new(),
             implemented_traits: Vec::new(),
             methods: Vec::new(),
-            fields: Vec::new(), // Could extract variants as fields
-            doc_comment: doc,
+            fields: Vec::new(),
+            doc_comment: self.extract_doc_comment(node),
             attributes: vec!["enum".to_string()],
-            type_parameters,
+            type_parameters: self.extract_type_parameters(node),
         };
 
         self.classes.push(class);
-
-        syn::visit::visit_item_enum(self, node);
     }
 
-    fn visit_item_trait(&mut self, node: &'ast ItemTrait) {
-        let vis = Self::extract_visibility(&node.vis);
-        let name = node.ident.to_string();
-        let doc = Self::extract_doc(&node.attrs);
+    /// Visit a trait declaration
+    fn visit_trait(&mut self, node: Node) {
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "Trait".to_string());
+
+        let visibility = self.extract_visibility(node);
 
         // Skip private traits if configured
-        if self.config.skip_private && vis == "private" {
+        if self.config.skip_private && visibility == "private" {
             return;
         }
 
-        // Extract trait methods
+        // Extract required methods from the trait body
         let mut required_methods = Vec::new();
-        for item in &node.items {
-            if let TraitItem::Fn(method) = item {
-                let method_name = method.sig.ident.to_string();
-                let signature = quote::quote!(#method.sig).to_string();
-                let parameters = Self::extract_parameters(&method.sig);
-                let return_type = Self::extract_return_type(&method.sig);
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                if child.kind() == "function_signature_item" || child.kind() == "function_item" {
+                    let method_name = child
+                        .child_by_field_name("name")
+                        .map(|n| self.node_text(n))
+                        .unwrap_or_else(|| "method".to_string());
 
-                let func = FunctionEntity {
-                    name: method_name,
-                    signature,
-                    visibility: "public".to_string(),
-                    line_start: 0,
-                    line_end: 0,
-                    is_async: Self::is_async(&method.sig),
-                    is_test: false,
-                    is_static: false,
-                    is_abstract: true,
-                    parameters,
-                    return_type,
-                    doc_comment: Self::extract_doc(&method.attrs),
-                    attributes: Vec::new(),
-                    parent_class: Some(name.clone()),
-                    complexity: None,
-                };
+                    let func = FunctionEntity {
+                        name: method_name,
+                        signature: self.extract_signature(child),
+                        visibility: "public".to_string(),
+                        line_start: child.start_position().row + 1,
+                        line_end: child.end_position().row + 1,
+                        is_async: self.is_async(child),
+                        is_test: false,
+                        is_static: false,
+                        is_abstract: true,
+                        parameters: self.extract_parameters(child),
+                        return_type: self.extract_return_type(child),
+                        doc_comment: self.extract_doc_comment(child),
+                        attributes: Vec::new(),
+                        parent_class: Some(name.clone()),
+                        complexity: None,
+                    };
 
-                required_methods.push(func);
+                    required_methods.push(func);
+                }
             }
         }
 
-        // Extract parent traits (trait inheritance)
-        let parent_traits = node
-            .supertraits
-            .iter()
-            .filter_map(|bound| {
-                if let syn::TypeParamBound::Trait(trait_bound) = bound {
-                    trait_bound
-                        .path
-                        .segments
-                        .last()
-                        .map(|seg| seg.ident.to_string())
-                } else {
-                    None
+        // Extract parent traits (supertraits)
+        let mut parent_traits = Vec::new();
+        if let Some(bounds) = node.child_by_field_name("bounds") {
+            let mut cursor = bounds.walk();
+            for child in bounds.children(&mut cursor) {
+                if child.kind() == "type_identifier" {
+                    parent_traits.push(self.node_text(child));
                 }
-            })
-            .collect();
+            }
+        }
 
         let trait_entity = TraitEntity {
             name: name.clone(),
-            visibility: vis,
-            line_start: 0,
-            line_end: 0,
+            visibility,
+            line_start: node.start_position().row + 1,
+            line_end: node.end_position().row + 1,
             required_methods,
             parent_traits,
-            doc_comment: doc,
+            doc_comment: self.extract_doc_comment(node),
             attributes: Vec::new(),
         };
 
         self.traits.push(trait_entity);
-
-        syn::visit::visit_item_trait(self, node);
     }
 
-    fn visit_item_impl(&mut self, node: &'ast ItemImpl) {
+    /// Visit an impl block
+    fn visit_impl(&mut self, node: Node) {
         // Extract the implementing type
-        let implementor = if let Type::Path(type_path) = &*node.self_ty {
-            type_path
-                .path
-                .segments
-                .last()
-                .map(|seg| seg.ident.to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        } else {
-            "unknown".to_string()
-        };
+        let implementor = node
+            .child_by_field_name("type")
+            .map(|n| {
+                // Handle generic types like Type<T> - extract just the base name
+                let text = self.node_text(n);
+                text.split('<').next().unwrap_or(&text).trim().to_string()
+            })
+            .unwrap_or_else(|| "unknown".to_string());
 
         // Check if this is a trait implementation
-        if let Some((_, trait_path, _)) = &node.trait_ {
-            let trait_name = trait_path
-                .segments
-                .last()
-                .map(|seg| seg.ident.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+        if let Some(trait_node) = node.child_by_field_name("trait") {
+            let trait_name = self.node_text(trait_node);
+            let trait_name = trait_name.split('<').next().unwrap_or(&trait_name).trim().to_string();
 
             let impl_rel = ImplementationRelation {
                 implementor: implementor.clone(),
@@ -387,73 +488,82 @@ impl<'ast> Visit<'ast> for RustVisitor {
         let previous_class = self.current_class.clone();
         self.current_class = Some(implementor.clone());
 
-        // Extract methods from impl block
-        for item in &node.items {
-            if let ImplItem::Fn(method) = item {
-                let vis = Self::extract_visibility(&method.vis);
-                let name = method.sig.ident.to_string();
-                let signature = quote::quote!(#method.sig).to_string();
-                let doc = Self::extract_doc(&method.attrs);
-                let parameters = Self::extract_parameters(&method.sig);
-                let return_type = Self::extract_return_type(&method.sig);
-                let is_async = Self::is_async(&method.sig);
+        // Extract methods from impl block body
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                if child.kind() == "function_item" {
+                    let method_name = child
+                        .child_by_field_name("name")
+                        .map(|n| self.node_text(n))
+                        .unwrap_or_else(|| "method".to_string());
 
-                // Check if it's a static method (no self parameter)
-                let is_static = !method
-                    .sig
-                    .inputs
-                    .iter()
-                    .any(|arg| matches!(arg, FnArg::Receiver(_)));
+                    let visibility = self.extract_visibility(child);
+                    let parameters = self.extract_parameters(child);
 
-                let func = FunctionEntity {
-                    name,
-                    signature,
-                    visibility: vis,
-                    line_start: 0,
-                    line_end: 0,
-                    is_async,
-                    is_test: false,
-                    is_static,
-                    is_abstract: false,
-                    parameters,
-                    return_type,
-                    doc_comment: doc,
-                    attributes: Vec::new(),
-                    parent_class: Some(implementor.clone()),
-                    complexity: None,
-                };
+                    // Check if it's a static method (no self parameter)
+                    let is_static = !parameters.iter().any(|p| p.name == "self");
 
-                self.functions.push(func);
+                    let func = FunctionEntity {
+                        name: method_name,
+                        signature: self.extract_signature(child),
+                        visibility,
+                        line_start: child.start_position().row + 1,
+                        line_end: child.end_position().row + 1,
+                        is_async: self.is_async(child),
+                        is_test: false,
+                        is_static,
+                        is_abstract: false,
+                        parameters,
+                        return_type: self.extract_return_type(child),
+                        doc_comment: self.extract_doc_comment(child),
+                        attributes: Vec::new(),
+                        parent_class: Some(implementor.clone()),
+                        complexity: None,
+                    };
+
+                    self.functions.push(func);
+                }
             }
         }
-
-        syn::visit::visit_item_impl(self, node);
 
         // Restore previous class context
         self.current_class = previous_class;
     }
 
-    fn visit_item_use(&mut self, node: &'ast ItemUse) {
-        // Extract use statements as imports
-        let import_path = quote::quote!(#node.tree).to_string();
+    /// Visit a use declaration
+    fn visit_use(&mut self, node: Node) {
+        // Extract the use tree
+        if let Some(use_tree) = node.child_by_field_name("argument") {
+            let import_path = self.node_text(use_tree);
 
-        let import = ImportRelation {
-            importer: "current_module".to_string(), // Would need context to know the module
-            imported: import_path,
-            symbols: Vec::new(),
-            is_wildcard: false,
-            alias: None,
-        };
+            let import = ImportRelation {
+                importer: "current_module".to_string(),
+                imported: import_path,
+                symbols: Vec::new(),
+                is_wildcard: false,
+                alias: None,
+            };
 
-        self.imports.push(import);
-
-        syn::visit::visit_item_use(self, node);
+            self.imports.push(import);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tree_sitter::Parser;
+
+    fn parse_and_visit(source: &str) -> RustVisitor {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_rust::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = RustVisitor::new(source.as_bytes(), ParserConfig::default());
+        visitor.visit_node(tree.root_node());
+        visitor
+    }
 
     #[test]
     fn test_visitor_function() {
@@ -462,12 +572,11 @@ fn hello() {
     println!("Hello");
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.functions.len(), 1);
         assert_eq!(visitor.functions[0].name, "hello");
+        assert_eq!(visitor.functions[0].line_start, 2);
+        assert_eq!(visitor.functions[0].line_end, 4);
     }
 
     #[test]
@@ -478,13 +587,12 @@ pub struct MyStruct {
     field2: i32,
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.classes.len(), 1);
         assert_eq!(visitor.classes[0].name, "MyStruct");
+        assert_eq!(visitor.classes[0].visibility, "public");
         assert_eq!(visitor.classes[0].fields.len(), 2);
+        assert_eq!(visitor.classes[0].line_start, 2);
     }
 
     #[test]
@@ -494,10 +602,7 @@ pub trait MyTrait {
     fn method(&self);
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.traits.len(), 1);
         assert_eq!(visitor.traits[0].name, "MyTrait");
         assert_eq!(visitor.traits[0].required_methods.len(), 1);
@@ -512,12 +617,10 @@ pub enum Status {
     Pending,
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.classes.len(), 1);
         assert_eq!(visitor.classes[0].name, "Status");
+        assert!(visitor.classes[0].attributes.contains(&"enum".to_string()));
     }
 
     #[test]
@@ -533,14 +636,13 @@ impl MyStruct {
     fn method(&self) {}
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.classes.len(), 1);
-        // Methods should be extracted
-        let struct_with_methods = &visitor.classes[0];
-        assert!(!struct_with_methods.methods.is_empty() || !visitor.functions.is_empty());
+        // Should extract 2 methods from the impl block
+        let impl_methods: Vec<_> = visitor.functions.iter()
+            .filter(|f| f.parent_class == Some("MyStruct".to_string()))
+            .collect();
+        assert_eq!(impl_methods.len(), 2);
     }
 
     #[test]
@@ -550,10 +652,7 @@ async fn fetch() -> String {
     "data".to_string()
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.functions.len(), 1);
         assert!(visitor.functions[0].is_async);
     }
@@ -564,11 +663,8 @@ async fn fetch() -> String {
 use std::collections::HashMap;
 use std::io::{self, Read};
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
-        assert!(!visitor.imports.is_empty());
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 2);
     }
 
     #[test]
@@ -578,10 +674,7 @@ pub struct Wrapper<T> {
     value: T,
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.classes.len(), 1);
         assert_eq!(visitor.classes[0].name, "Wrapper");
         assert!(!visitor.classes[0].type_parameters.is_empty());
@@ -600,16 +693,12 @@ impl Display for Item {
     fn display(&self) {}
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.traits.len(), 1);
         assert_eq!(visitor.classes.len(), 1);
-        assert!(
-            !visitor.implementations.is_empty()
-                || !visitor.classes[0].implemented_traits.is_empty()
-        );
+        assert!(!visitor.implementations.is_empty());
+        assert_eq!(visitor.implementations[0].implementor, "Item");
+        assert_eq!(visitor.implementations[0].trait_name, "Display");
     }
 
     #[test]
@@ -619,14 +708,9 @@ impl Display for Item {
 #[ignore]
 fn test_something() {}
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.functions.len(), 1);
         assert!(visitor.functions[0].is_test);
-        // Note: Full attribute extraction not yet implemented
-        // Attributes are detected for is_test flag but not stored in attributes vector
     }
 
     #[test]
@@ -636,18 +720,18 @@ pub fn public_fn() {}
 fn private_fn() {}
 pub(crate) fn crate_fn() {}
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.functions.len(), 3);
-        // Check that visibility is captured
-        let public_count = visitor
-            .functions
-            .iter()
-            .filter(|f| f.visibility.contains("public"))
+
+        let public_count = visitor.functions.iter()
+            .filter(|f| f.visibility == "public")
             .count();
         assert!(public_count >= 1);
+
+        let internal_count = visitor.functions.iter()
+            .filter(|f| f.visibility == "internal")
+            .count();
+        assert!(internal_count >= 1);
     }
 
     #[test]
@@ -676,13 +760,21 @@ impl Struct1 {
     }
 }
 "#;
-        let syntax_tree = syn::parse_file(source).unwrap();
-        let mut visitor = RustVisitor::new(ParserConfig::default());
-        visitor.visit_file(&syntax_tree);
-
+        let visitor = parse_and_visit(source);
         assert_eq!(visitor.traits.len(), 1);
         assert!(visitor.classes.len() >= 2); // Struct1 and Enum1
         assert!(!visitor.functions.is_empty());
         assert!(!visitor.imports.is_empty());
+    }
+
+    #[test]
+    fn test_accurate_line_numbers() {
+        let source = "fn first() {}\n\nfn second() {}";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.functions.len(), 2);
+        assert_eq!(visitor.functions[0].name, "first");
+        assert_eq!(visitor.functions[0].line_start, 1);
+        assert_eq!(visitor.functions[1].name, "second");
+        assert_eq!(visitor.functions[1].line_start, 3);
     }
 }

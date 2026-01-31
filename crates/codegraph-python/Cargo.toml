@@ -1,6 +1,6 @@
 [package]
 name = "codegraph-python"
-version = "0.3.2"
+version = "0.4.0"
 edition.workspace = true
 rust-version = "1.75"
 authors.workspace = true
@@ -17,9 +17,9 @@ codegraph.workspace = true
 # Parser API
 codegraph-parser-api.workspace = true
 
-# Python AST parsing
-rustpython-parser = "0.4"
-rustpython-ast = "0.4"
+# Python parser - tree-sitter based
+tree-sitter = "0.20"
+tree-sitter-python = "0.20"
 
 # Error handling
 thiserror.workspace = true

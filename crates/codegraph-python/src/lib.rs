@@ -46,7 +46,7 @@ mod builder;
 mod extractor;
 mod parser;
 mod parser_impl;
-// mod visitor; // Temporarily disabled - will be re-enabled in a future task
+mod visitor;
 
 // Re-export parser-api types for convenience
 pub use codegraph_parser_api::{

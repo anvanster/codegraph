@@ -187,17 +187,20 @@ impl Parser {
         // Create FileInfo from IR
         let mut file_info = FileInfo::new(file_path.to_path_buf());
 
-        // Convert NodeId to String for tracking (include top-level functions and methods)
-        file_info.functions = ir.functions.iter().map(|f| f.name.clone()).collect();
-
-        // Also add methods from classes
-        for class in &ir.classes {
-            for method in &class.methods {
-                file_info
-                    .functions
-                    .push(format!("{}.{}", class.name, method.name));
-            }
-        }
+        // Convert function entities to strings for tracking
+        // Methods from classes are already included in ir.functions with parent_class set
+        // So we just need all functions, using qualified names for methods
+        file_info.functions = ir
+            .functions
+            .iter()
+            .map(|f| {
+                if let Some(ref class_name) = f.parent_class {
+                    format!("{}.{}", class_name, f.name)
+                } else {
+                    f.name.clone()
+                }
+            })
+            .collect();
 
         file_info.classes = ir.classes.iter().map(|c| c.name.clone()).collect();
         file_info.traits = ir.traits.iter().map(|t| t.name.clone()).collect();

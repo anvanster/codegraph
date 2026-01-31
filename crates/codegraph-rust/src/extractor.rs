@@ -1,11 +1,11 @@
-//! AST extraction for Rust source code
+//! AST extraction for Rust source code using tree-sitter
 //!
 //! This module parses Rust source code and extracts entities and relationships
 //! into a CodeIR representation.
 
 use codegraph_parser_api::{CodeIR, ModuleEntity, ParserConfig, ParserError};
 use std::path::Path;
-use syn::{visit::Visit, File};
+use tree_sitter::Parser;
 
 use crate::visitor::RustVisitor;
 
@@ -23,9 +23,39 @@ pub fn extract(
     file_path: &Path,
     config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
-    // Parse the source code into a syn AST
-    let syntax_tree = syn::parse_file(source)
-        .map_err(|e| ParserError::SyntaxError(file_path.to_path_buf(), 0, 0, e.to_string()))?;
+    // Initialize tree-sitter parser
+    let mut parser = Parser::new();
+    parser
+        .set_language(tree_sitter_rust::language())
+        .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
+
+    // Parse the source code
+    let tree = parser.parse(source, None).ok_or_else(|| {
+        ParserError::ParseError(file_path.to_path_buf(), "Failed to parse".to_string())
+    })?;
+
+    let root_node = tree.root_node();
+    if root_node.has_error() {
+        // Find the first error node for better error reporting
+        let mut cursor = root_node.walk();
+        let error_node = root_node.children(&mut cursor).find(|n| n.is_error());
+
+        if let Some(err) = error_node {
+            return Err(ParserError::SyntaxError(
+                file_path.to_path_buf(),
+                err.start_position().row + 1,
+                err.start_position().column,
+                "Syntax error".to_string(),
+            ));
+        }
+
+        return Err(ParserError::SyntaxError(
+            file_path.to_path_buf(),
+            0,
+            0,
+            "Syntax error".to_string(),
+        ));
+    }
 
     // Create IR for this file
     let mut ir = CodeIR::new(file_path.to_path_buf());
@@ -42,15 +72,15 @@ pub fn extract(
         path: file_path.display().to_string(),
         language: "rust".to_string(),
         line_count: source.lines().count(),
-        doc_comment: extract_file_doc(&syntax_tree),
+        doc_comment: extract_file_doc(source, &tree),
         attributes: Vec::new(),
     };
 
     ir.module = Some(module);
 
     // Create visitor and walk the AST
-    let mut visitor = RustVisitor::new(config.clone());
-    visitor.visit_file(&syntax_tree);
+    let mut visitor = RustVisitor::new(source.as_bytes(), config.clone());
+    visitor.visit_node(root_node);
 
     // Transfer extracted entities to IR
     ir.functions = visitor.functions;
@@ -65,20 +95,29 @@ pub fn extract(
 }
 
 /// Extract documentation from the file level (if any)
-fn extract_file_doc(file: &File) -> Option<String> {
-    // Look for inner doc comments at the file level
-    for attr in &file.attrs {
-        if attr.path().is_ident("doc") {
-            if let Ok(meta) = attr.meta.require_name_value() {
-                if let syn::Expr::Lit(expr_lit) = &meta.value {
-                    if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                        return Some(lit_str.value());
-                    }
-                }
+fn extract_file_doc(source: &str, tree: &tree_sitter::Tree) -> Option<String> {
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    let mut docs = Vec::new();
+
+    // Look for inner doc comments (//!) at the start of the file
+    for child in root.children(&mut cursor) {
+        if child.kind() == "line_comment" {
+            let text = child.utf8_text(source.as_bytes()).unwrap_or("");
+            if text.starts_with("//!") {
+                docs.push(text[3..].trim().to_string());
             }
+        } else if child.kind() != "attribute_item" {
+            // Stop looking once we hit non-doc content
+            break;
         }
     }
-    None
+
+    if docs.is_empty() {
+        None
+    } else {
+        Some(docs.join("\n"))
+    }
 }
 
 #[cfg(test)]
@@ -99,6 +138,7 @@ fn hello() {
         let ir = result.unwrap();
         assert_eq!(ir.functions.len(), 1);
         assert_eq!(ir.functions[0].name, "hello");
+        assert_eq!(ir.functions[0].line_start, 2);
     }
 
     #[test]
@@ -116,6 +156,7 @@ pub struct MyStruct {
         let ir = result.unwrap();
         assert_eq!(ir.classes.len(), 1);
         assert_eq!(ir.classes[0].name, "MyStruct");
+        assert_eq!(ir.classes[0].line_start, 2);
     }
 
     #[test]
@@ -346,5 +387,20 @@ fn test_something() {
         let ir = result.unwrap();
         assert_eq!(ir.functions.len(), 1);
         assert!(ir.functions[0].is_test);
+    }
+
+    #[test]
+    fn test_accurate_line_numbers() {
+        let source = "fn first() {}\n\nfn second() {}";
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.functions.len(), 2);
+        assert_eq!(ir.functions[0].name, "first");
+        assert_eq!(ir.functions[0].line_start, 1);
+        assert_eq!(ir.functions[1].name, "second");
+        assert_eq!(ir.functions[1].line_start, 3);
     }
 }
