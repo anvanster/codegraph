@@ -56,6 +56,7 @@ pub fn ir_to_graph(
     for func in &ir.functions {
         let mut props = PropertyMap::new()
             .with("name", func.name.clone())
+            .with("path", file_path.display().to_string())
             .with("signature", func.signature.clone())
             .with("visibility", func.visibility.clone())
             .with("line_start", func.line_start.to_string())
@@ -87,6 +88,7 @@ pub fn ir_to_graph(
     for class in &ir.classes {
         let mut props = PropertyMap::new()
             .with("name", class.name.clone())
+            .with("path", file_path.display().to_string())
             .with("visibility", class.visibility.clone())
             .with("line_start", class.line_start.to_string())
             .with("line_end", class.line_end.to_string())
@@ -113,6 +115,7 @@ pub fn ir_to_graph(
             let method_name = format!("{}.{}", class.name, method.name);
             let mut method_props = PropertyMap::new()
                 .with("name", method_name.clone())
+                .with("path", file_path.display().to_string())
                 .with("signature", method.signature.clone())
                 .with("visibility", method.visibility.clone())
                 .with("line_start", method.line_start.to_string())
@@ -142,6 +145,7 @@ pub fn ir_to_graph(
     for interface in &ir.traits {
         let mut props = PropertyMap::new()
             .with("name", interface.name.clone())
+            .with("path", file_path.display().to_string())
             .with("visibility", interface.visibility.clone())
             .with("line_start", interface.line_start.to_string())
             .with("line_end", interface.line_end.to_string());
