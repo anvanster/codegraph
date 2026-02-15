@@ -36,7 +36,6 @@ pub struct SdcData {
     pub timing_exceptions: Vec<SdcTimingException>,
 }
 
-
 pub enum SdcConstraint {
     Clock(SdcClock),
     IoDelay(SdcIoDelay),
@@ -88,8 +87,13 @@ pub fn collect_args(node: Node, source: &[u8]) -> Vec<String> {
 
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "simple_word" | "quoted_word" | "braced_word" | "braced_word_simple"
-            | "variable_substitution" | "command_substitution" | "word_list" => {
+            "simple_word"
+            | "quoted_word"
+            | "braced_word"
+            | "braced_word_simple"
+            | "variable_substitution"
+            | "command_substitution"
+            | "word_list" => {
                 if !skipped_name {
                     skipped_name = true;
                     continue;
@@ -122,11 +126,7 @@ pub fn collect_args(node: Node, source: &[u8]) -> Vec<String> {
 }
 
 /// Parse an SDC command node into a structured constraint
-pub fn extract_sdc_constraint(
-    cmd_name: &str,
-    node: Node,
-    source: &[u8],
-) -> Option<SdcConstraint> {
+pub fn extract_sdc_constraint(cmd_name: &str, node: Node, source: &[u8]) -> Option<SdcConstraint> {
     let args = collect_args(node, source);
     match cmd_name {
         "create_clock" | "create_generated_clock" => extract_create_clock(&args),
@@ -194,8 +194,14 @@ fn extract_io_delay(delay_type: &str, args: &[String]) -> Option<SdcConstraint> 
                 clock = args.get(i + 1).cloned().unwrap_or_default();
                 i += 2;
             }
-            "-max" | "-min" | "-rise" | "-fall" | "-add_delay" | "-network_latency_included"
-            | "-source_latency_included" | "-reference_pin" => {
+            "-max"
+            | "-min"
+            | "-rise"
+            | "-fall"
+            | "-add_delay"
+            | "-network_latency_included"
+            | "-source_latency_included"
+            | "-reference_pin" => {
                 i += 2;
             }
             s if s.starts_with('-') => {
@@ -237,8 +243,15 @@ fn extract_timing_exception(exception_type: &str, args: &[String]) -> Option<Sdc
             "-through" | "-rise_through" | "-fall_through" => {
                 i += 2;
             }
-            "-setup" | "-hold" | "-comment" | "-group" | "-name" | "-physically_exclusive"
-            | "-logically_exclusive" | "-asynchronous" | "-allow_paths" => {
+            "-setup"
+            | "-hold"
+            | "-comment"
+            | "-group"
+            | "-name"
+            | "-physically_exclusive"
+            | "-logically_exclusive"
+            | "-asynchronous"
+            | "-allow_paths" => {
                 i += 2;
             }
             s if s.starts_with('-') => {
@@ -305,11 +318,7 @@ mod tests {
 
     #[test]
     fn test_extract_io_delay() {
-        let args = vec![
-            "-clock".to_string(),
-            "clk".to_string(),
-            "0.5".to_string(),
-        ];
+        let args = vec!["-clock".to_string(), "clk".to_string(), "0.5".to_string()];
         let result = extract_io_delay("input", &args);
         assert!(result.is_some());
         if let Some(SdcConstraint::IoDelay(delay)) = result {

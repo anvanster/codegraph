@@ -7,13 +7,34 @@ use tree_sitter::Node;
 /// Classified EDA command result
 #[allow(dead_code)]
 pub enum EdaCommand {
-    DesignFileRead { file_type: String, path: String },
-    DesignFileWrite { file_type: String, path: String },
-    ToolFlowCommand { name: String, category: String },
-    ObjectQuery { name: String, collection_type: String },
-    CommandRegistration { name: String, usage: String },
-    CollectionIteration { variable: String, collection_cmd: String },
-    AttributeAccess { object: String, attribute: String },
+    DesignFileRead {
+        file_type: String,
+        path: String,
+    },
+    DesignFileWrite {
+        file_type: String,
+        path: String,
+    },
+    ToolFlowCommand {
+        name: String,
+        category: String,
+    },
+    ObjectQuery {
+        name: String,
+        collection_type: String,
+    },
+    CommandRegistration {
+        name: String,
+        usage: String,
+    },
+    CollectionIteration {
+        variable: String,
+        collection_cmd: String,
+    },
+    AttributeAccess {
+        object: String,
+        attribute: String,
+    },
 }
 
 /// Accumulated EDA data during visitation
@@ -150,7 +171,9 @@ const OPENROAD_PREFIXES: &[&str] = &[
 ];
 
 pub fn is_openroad_namespaced(name: &str) -> bool {
-    OPENROAD_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+    OPENROAD_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
 }
 
 /// Strip namespace prefix from a command name for lookup
@@ -346,7 +369,9 @@ mod tests {
     fn test_is_openroad_namespaced() {
         assert!(is_openroad_namespaced("sta::parse_key_args"));
         assert!(is_openroad_namespaced("ord::read_lef_cmd"));
-        assert!(is_openroad_namespaced("gpl::get_global_placement_uniform_density"));
+        assert!(is_openroad_namespaced(
+            "gpl::get_global_placement_uniform_density"
+        ));
         assert!(!is_openroad_namespaced("my_proc"));
     }
 

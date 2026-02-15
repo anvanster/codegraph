@@ -292,8 +292,7 @@ impl<'a> TclVisitor<'a> {
                     if let Some(args_node) = child.child_by_field_name("arguments") {
                         let mut ic = args_node.walk();
                         for inner in args_node.children(&mut ic) {
-                            if inner.kind() == "braced_word"
-                                || inner.kind() == "braced_word_simple"
+                            if inner.kind() == "braced_word" || inner.kind() == "braced_word_simple"
                             {
                                 if params_node.is_none() {
                                     params_node = Some(inner);
@@ -397,10 +396,7 @@ impl<'a> TclVisitor<'a> {
     }
 
     /// Extract namespace name/body from a `command` node (name="namespace").
-    fn extract_namespace_from_command<'b>(
-        &self,
-        node: Node<'b>,
-    ) -> (String, Option<Node<'b>>) {
+    fn extract_namespace_from_command<'b>(&self, node: Node<'b>) -> (String, Option<Node<'b>>) {
         let args = self.collect_argument_nodes(node);
         if args.is_empty() {
             return (String::new(), None);
@@ -414,10 +410,7 @@ impl<'a> TclVisitor<'a> {
     }
 
     /// Extract namespace name/body from ERROR/procedure node trees.
-    fn extract_namespace_from_tree<'b>(
-        &self,
-        node: Node<'b>,
-    ) -> (String, Option<Node<'b>>) {
+    fn extract_namespace_from_tree<'b>(&self, node: Node<'b>) -> (String, Option<Node<'b>>) {
         let mut found_eval = false;
         let mut ns_name = String::new();
         let mut body_node: Option<Node<'b>> = None;
@@ -557,10 +550,7 @@ impl<'a> TclVisitor<'a> {
         let args = self.collect_argument_nodes(node);
         if let Some(arg) = args.first() {
             let filename = self.node_text(*arg).trim().to_string();
-            let cleaned = filename
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_string();
+            let cleaned = filename.trim_matches('"').trim_matches('\'').to_string();
             if !cleaned.is_empty() {
                 self.imports.push(ImportRelation {
                     importer: "file".to_string(),
@@ -783,10 +773,11 @@ impl<'a> TclVisitor<'a> {
         let mut func = FunctionEntity::new(
             &qualified,
             proc_node.start_position().row + 1,
-            tokens.get(body_end).map_or(
-                proc_node.end_position().row + 1,
-                |n| n.end_position().row + 1,
-            ),
+            tokens
+                .get(body_end)
+                .map_or(proc_node.end_position().row + 1, |n| {
+                    n.end_position().row + 1
+                }),
         )
         .with_visibility("public")
         .with_signature(&signature);
@@ -887,10 +878,7 @@ impl<'a> TclVisitor<'a> {
 
     fn extract_params_from_braced(&self, node: Node) -> Vec<Parameter> {
         let text = self.node_text(node);
-        let inner = text
-            .trim_start_matches('{')
-            .trim_end_matches('}')
-            .trim();
+        let inner = text.trim_start_matches('{').trim_end_matches('}').trim();
 
         if inner.is_empty() {
             return Vec::new();
@@ -1124,14 +1112,8 @@ mod tests {
         let source = b"package require Tcl 8.6\npackage require http";
         let visitor = parse_and_visit(source);
 
-        assert!(visitor
-            .imports
-            .iter()
-            .any(|i| i.imported == "Tcl"));
-        assert!(visitor
-            .imports
-            .iter()
-            .any(|i| i.imported == "http"));
+        assert!(visitor.imports.iter().any(|i| i.imported == "Tcl"));
+        assert!(visitor.imports.iter().any(|i| i.imported == "http"));
     }
 
     #[test]
@@ -1183,7 +1165,8 @@ mod tests {
 
     #[test]
     fn test_visit_namespace_eval() {
-        let source = b"namespace eval math {\n    proc add {a b} {\n        expr {$a + $b}\n    }\n}";
+        let source =
+            b"namespace eval math {\n    proc add {a b} {\n        expr {$a + $b}\n    }\n}";
         let visitor = parse_and_visit(source);
 
         assert!(!visitor.classes.is_empty());
@@ -1208,8 +1191,7 @@ mod tests {
 
     #[test]
     fn test_complexity_with_branches() {
-        let source =
-            b"proc check {x} {\n    if {$x > 0} {\n        puts positive\n    }\n}";
+        let source = b"proc check {x} {\n    if {$x > 0} {\n        puts positive\n    }\n}";
         let visitor = parse_and_visit(source);
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1324,8 +1306,14 @@ source lib/utils.tcl
 
         assert!(visitor.imports.iter().any(|i| i.imported == "Tcl"));
         assert!(visitor.imports.iter().any(|i| i.imported == "http"));
-        assert!(visitor.imports.iter().any(|i| i.imported.contains("helpers.tcl")));
-        assert!(visitor.imports.iter().any(|i| i.imported.contains("lib/utils.tcl")));
+        assert!(visitor
+            .imports
+            .iter()
+            .any(|i| i.imported.contains("helpers.tcl")));
+        assert!(visitor
+            .imports
+            .iter()
+            .any(|i| i.imported.contains("lib/utils.tcl")));
     }
 
     #[test]
@@ -1342,7 +1330,11 @@ source lib/utils.tcl
         assert!(
             visitor.functions.iter().any(|f| f.name.contains("add")),
             "should find add proc, got: {:?}",
-            visitor.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
+            visitor
+                .functions
+                .iter()
+                .map(|f| &f.name)
+                .collect::<Vec<_>>()
         );
         // Proc should be namespace-qualified
         if let Some(f) = visitor.functions.iter().find(|f| f.name.contains("add")) {
@@ -1378,7 +1370,12 @@ source lib/utils.tcl
 
         for (source, expected_call) in sources {
             let visitor = parse_and_visit(source);
-            assert_eq!(visitor.functions.len(), 1, "should find proc for {}", expected_call);
+            assert_eq!(
+                visitor.functions.len(),
+                1,
+                "should find proc for {}",
+                expected_call
+            );
             assert!(
                 visitor.calls.iter().any(|c| c.callee == expected_call),
                 "{} should be recorded as call, got: {:?}",
@@ -1408,9 +1405,18 @@ source lib/utils.tcl
         assert_eq!(visitor.functions.len(), 1);
         let f = &visitor.functions[0];
         assert_eq!(f.name, "connect");
-        assert!(f.parameters.iter().any(|p| p.name == "host" && p.default_value.is_none()));
-        assert!(f.parameters.iter().any(|p| p.name == "port" && p.default_value == Some("8080".to_string())));
-        assert!(f.parameters.iter().any(|p| p.name == "timeout" && p.default_value == Some("30".to_string())));
+        assert!(f
+            .parameters
+            .iter()
+            .any(|p| p.name == "host" && p.default_value.is_none()));
+        assert!(f
+            .parameters
+            .iter()
+            .any(|p| p.name == "port" && p.default_value == Some("8080".to_string())));
+        assert!(f
+            .parameters
+            .iter()
+            .any(|p| p.name == "timeout" && p.default_value == Some("30".to_string())));
     }
 
     #[test]
@@ -1446,7 +1452,11 @@ set_false_path -from [get_clocks pll_clk] -to [get_clocks sys_clk]
         assert!(
             visitor.imports.iter().any(|i| i.imported.contains("top.v")),
             "should import top.v, got: {:?}",
-            visitor.imports.iter().map(|i| &i.imported).collect::<Vec<_>>()
+            visitor
+                .imports
+                .iter()
+                .map(|i| &i.imported)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1456,9 +1466,18 @@ set_false_path -from [get_clocks pll_clk] -to [get_clocks sys_clk]
         let visitor = parse_and_visit(source);
 
         let callees: Vec<&str> = visitor.calls.iter().map(|c| c.callee.as_str()).collect();
-        assert!(callees.contains(&"report_timing"), "should record report_timing");
-        assert!(callees.contains(&"report_area"), "should record report_area");
-        assert!(callees.contains(&"compile_ultra"), "should record compile_ultra");
+        assert!(
+            callees.contains(&"report_timing"),
+            "should record report_timing"
+        );
+        assert!(
+            callees.contains(&"report_area"),
+            "should record report_area"
+        );
+        assert!(
+            callees.contains(&"compile_ultra"),
+            "should record compile_ultra"
+        );
     }
 
     #[test]
@@ -1480,13 +1499,17 @@ proc add {a b} {
 
         // Imports
         assert!(visitor.imports.iter().any(|i| i.imported == "Tcl"));
-        assert!(visitor.imports.iter().any(|i| i.imported.contains("helpers.tcl")));
+        assert!(visitor
+            .imports
+            .iter()
+            .any(|i| i.imported.contains("helpers.tcl")));
 
         // Functions
         let fn_names: Vec<&str> = visitor.functions.iter().map(|f| f.name.as_str()).collect();
         assert!(
             fn_names.contains(&"greet"),
-            "should find greet, got: {:?}", fn_names
+            "should find greet, got: {:?}",
+            fn_names
         );
     }
 }

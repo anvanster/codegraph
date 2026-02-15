@@ -1,7 +1,9 @@
 //! TclParser implementing the CodeParser trait
 
 use codegraph::CodeGraph;
-use codegraph_parser_api::{CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics, ProjectInfo};
+use codegraph_parser_api::{
+    CodeParser, FileInfo, ParserConfig, ParserError, ParserMetrics, ProjectInfo,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -63,8 +65,8 @@ impl CodeParser for TclParser {
             ));
         }
 
-        let source = fs::read_to_string(path)
-            .map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
+        let source =
+            fs::read_to_string(path).map_err(|e| ParserError::IoError(path.to_path_buf(), e))?;
 
         if source.len() > self.config.max_file_size {
             return Err(ParserError::FileTooLarge(path.to_path_buf(), source.len()));

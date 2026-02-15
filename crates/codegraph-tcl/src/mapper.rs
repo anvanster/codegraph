@@ -239,10 +239,7 @@ pub fn ir_to_graph(
     for (caller_name, callees) in unresolved_calls {
         if let Some(&caller_id) = node_map.get(&caller_name) {
             if let Ok(node) = graph.get_node(caller_id) {
-                let existing = node
-                    .properties
-                    .get_string("unresolved_calls")
-                    .unwrap_or("");
+                let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
                 let mut all_callees: Vec<&str> = if existing.is_empty() {
                     Vec::new()
                 } else {
