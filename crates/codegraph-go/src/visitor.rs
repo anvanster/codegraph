@@ -275,7 +275,7 @@ mod tests {
 
         let source = b"package main\nfunc greet(name string) string { return \"Hello\" }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -291,7 +291,7 @@ mod tests {
 
         let source = b"package main\ntype Person struct { Name string }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -307,7 +307,7 @@ mod tests {
 
         let source = b"package main\ntype Reader interface { Read() error }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -323,7 +323,7 @@ mod tests {
 
         let source = b"package main\nfunc (p Person) String() string { return \"\" }";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -340,7 +340,7 @@ mod tests {
 
         let source = b"package main\nimport \"fmt\"";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -355,7 +355,7 @@ mod tests {
 
         let source = b"package main\ntype User struct {}\ntype Admin struct {}";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -373,7 +373,7 @@ mod tests {
 
         let source = b"package main\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"io\"\n)";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -396,7 +396,7 @@ mod tests {
 
         let source = b"package main\nimport f \"fmt\"";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -414,7 +414,7 @@ mod tests {
 
         let source = b"package main\nimport . \"fmt\"";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -432,7 +432,7 @@ mod tests {
 
         let source = b"package main\nimport _ \"database/sql\"";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());
@@ -450,7 +450,7 @@ mod tests {
 
         let source = b"package main\nimport (\n\tf \"fmt\"\n\t. \"os\"\n\t_ \"encoding/json\"\n)";
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_go::language()).unwrap();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = GoVisitor::new(source, ParserConfig::default());

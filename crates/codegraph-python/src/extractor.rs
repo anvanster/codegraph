@@ -17,7 +17,7 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
     // Initialize tree-sitter parser
     let mut parser = Parser::new();
     parser
-        .set_language(tree_sitter_python::language())
+        .set_language(&tree_sitter_python::language())
         .map_err(|e| format!("Failed to set language: {e}"))?;
 
     // Parse the source code

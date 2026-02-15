@@ -29,7 +29,7 @@ pub fn extract(
     };
 
     parser
-        .set_language(language)
+        .set_language(&language)
         .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
 
     // Parse the source code

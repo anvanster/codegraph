@@ -557,7 +557,7 @@ mod tests {
 
     fn parse_and_visit(source: &str) -> RustVisitor {
         let mut parser = Parser::new();
-        parser.set_language(tree_sitter_rust::language()).unwrap();
+        parser.set_language(&tree_sitter_rust::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let mut visitor = RustVisitor::new(source.as_bytes(), ParserConfig::default());

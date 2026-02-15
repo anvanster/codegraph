@@ -99,7 +99,7 @@ pub fn extract_with_options(
     let mut parser = Parser::new();
     let language = tree_sitter_c::language();
     parser
-        .set_language(language)
+        .set_language(&language)
         .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
 
     let tree = parser.parse(&processed_source, None).ok_or_else(|| {

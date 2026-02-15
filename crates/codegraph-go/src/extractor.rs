@@ -15,7 +15,7 @@ pub fn extract(
     let mut parser = Parser::new();
     let language = tree_sitter_go::language();
     parser
-        .set_language(language)
+        .set_language(&language)
         .map_err(|e| ParserError::ParseError(file_path.to_path_buf(), e.to_string()))?;
 
     let tree = parser.parse(source, None).ok_or_else(|| {
