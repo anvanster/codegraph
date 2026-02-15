@@ -510,11 +510,25 @@ impl CodeGraph {
     ///
     /// This is a destructive operation that cannot be undone.
     pub fn clear(&mut self) -> Result<()> {
-        // Clear all nodes
+        // Delete all edges from storage first (avoids cascading delete issues)
+        let edge_ids: Vec<_> = self.edges.keys().copied().collect();
+        for edge_id in edge_ids {
+            let key = format!("edge:{edge_id}");
+            self.storage.delete(key.as_bytes())?;
+        }
+
+        // Delete all nodes from storage
         let node_ids: Vec<_> = self.nodes.keys().copied().collect();
         for node_id in node_ids {
-            self.delete_node(node_id)?;
+            let key = format!("node:{node_id}");
+            self.storage.delete(key.as_bytes())?;
         }
+
+        // Clear in-memory caches
+        self.edges.clear();
+        self.nodes.clear();
+        self.adjacency_out.clear();
+        self.adjacency_in.clear();
 
         // Reset counters
         self.node_counter = 0;

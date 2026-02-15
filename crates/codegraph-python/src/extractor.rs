@@ -56,8 +56,12 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
         .to_string();
 
     let line_count = source.lines().count();
-    let module = ModuleEntity::new(module_name.clone(), file_path.display().to_string(), "python")
-        .with_line_count(line_count);
+    let module = ModuleEntity::new(
+        module_name.clone(),
+        file_path.display().to_string(),
+        "python",
+    )
+    .with_line_count(line_count);
     ir.set_module(module);
 
     // Walk through top-level statements
@@ -67,12 +71,8 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
             "function_definition" => {
                 if let Some(func) = extract_function(source_bytes, child, config, None) {
                     // Extract calls from function body
-                    let calls = extract_calls_from_node(
-                        source_bytes,
-                        child,
-                        &func.name,
-                        func.line_start,
-                    );
+                    let calls =
+                        extract_calls_from_node(source_bytes, child, &func.name, func.line_start);
                     for call in calls {
                         ir.add_call(call);
                     }
@@ -225,7 +225,9 @@ fn extract_function(
     };
 
     let is_static = decorators.iter().any(|d| d.contains("staticmethod"));
-    let is_test = decorators.iter().any(|d| d.contains("test") || d.contains("pytest"));
+    let is_test = decorators
+        .iter()
+        .any(|d| d.contains("test") || d.contains("pytest"));
 
     // Calculate complexity
     let complexity = node
@@ -564,7 +566,11 @@ fn extract_import_from(source: &[u8], node: Node, importer: &str) -> Vec<ImportR
             }
             "dotted_name" | "identifier" => {
                 // Skip the module name part
-                if child.start_byte() > node.child_by_field_name("module_name").map_or(0, |n| n.end_byte()) {
+                if child.start_byte()
+                    > node
+                        .child_by_field_name("module_name")
+                        .map_or(0, |n| n.end_byte())
+                {
                     symbols.push(child.utf8_text(source).unwrap_or("").to_string());
                 }
             }
@@ -725,7 +731,9 @@ fn calculate_complexity_recursive(source: &[u8], node: Node, builder: &mut Compl
             // Ternary: a if condition else b
             builder.add_branch();
         }
-        "list_comprehension" | "set_comprehension" | "dictionary_comprehension"
+        "list_comprehension"
+        | "set_comprehension"
+        | "dictionary_comprehension"
         | "generator_expression" => {
             // Comprehensions with conditions
             let mut cursor = node.walk();
@@ -845,7 +853,10 @@ def main():
         let config = ParserConfig::default();
         let ir = extract(source, path, &config).unwrap();
 
-        assert!(ir.imports.len() >= 4, "Should find at least 4 import statements");
+        assert!(
+            ir.imports.len() >= 4,
+            "Should find at least 4 import statements"
+        );
     }
 
     #[test]

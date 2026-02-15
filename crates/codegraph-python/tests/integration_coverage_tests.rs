@@ -559,7 +559,10 @@ fn test_project_info_success_rate() {
     let project_info = result.unwrap();
     // Tree-sitter is more lenient and may parse incomplete code
     // Check that all 4 files were attempted
-    assert_eq!(project_info.files.len() + project_info.failed_files.len(), 4);
+    assert_eq!(
+        project_info.files.len() + project_info.failed_files.len(),
+        4
+    );
 }
 
 #[test]

@@ -193,9 +193,8 @@ impl<'a> RustVisitor<'a> {
                             .map(|n| self.node_text(n))
                             .unwrap_or_else(|| "unknown".to_string());
 
-                        let type_annotation = child
-                            .child_by_field_name("type")
-                            .map(|n| self.node_text(n));
+                        let type_annotation =
+                            child.child_by_field_name("type").map(|n| self.node_text(n));
 
                         params.push(Parameter {
                             name,
@@ -214,8 +213,12 @@ impl<'a> RustVisitor<'a> {
 
     /// Extract return type from function signature
     fn extract_return_type(&self, node: Node) -> Option<String> {
-        node.child_by_field_name("return_type")
-            .map(|n| self.node_text(n).trim_start_matches("->").trim().to_string())
+        node.child_by_field_name("return_type").map(|n| {
+            self.node_text(n)
+                .trim_start_matches("->")
+                .trim()
+                .to_string()
+        })
     }
 
     /// Extract the first line as signature
@@ -315,9 +318,7 @@ impl<'a> RustVisitor<'a> {
                         .map(|n| self.node_text(n))
                         .unwrap_or_else(|| "unnamed".to_string());
 
-                    let field_type = child
-                        .child_by_field_name("type")
-                        .map(|n| self.node_text(n));
+                    let field_type = child.child_by_field_name("type").map(|n| self.node_text(n));
 
                     let field_vis = self.extract_visibility(child);
 
@@ -474,7 +475,12 @@ impl<'a> RustVisitor<'a> {
         // Check if this is a trait implementation
         if let Some(trait_node) = node.child_by_field_name("trait") {
             let trait_name = self.node_text(trait_node);
-            let trait_name = trait_name.split('<').next().unwrap_or(&trait_name).trim().to_string();
+            let trait_name = trait_name
+                .split('<')
+                .next()
+                .unwrap_or(&trait_name)
+                .trim()
+                .to_string();
 
             let impl_rel = ImplementationRelation {
                 implementor: implementor.clone(),
@@ -639,7 +645,9 @@ impl MyStruct {
         let visitor = parse_and_visit(source);
         assert_eq!(visitor.classes.len(), 1);
         // Should extract 2 methods from the impl block
-        let impl_methods: Vec<_> = visitor.functions.iter()
+        let impl_methods: Vec<_> = visitor
+            .functions
+            .iter()
             .filter(|f| f.parent_class == Some("MyStruct".to_string()))
             .collect();
         assert_eq!(impl_methods.len(), 2);
@@ -723,12 +731,16 @@ pub(crate) fn crate_fn() {}
         let visitor = parse_and_visit(source);
         assert_eq!(visitor.functions.len(), 3);
 
-        let public_count = visitor.functions.iter()
+        let public_count = visitor
+            .functions
+            .iter()
             .filter(|f| f.visibility == "public")
             .count();
         assert!(public_count >= 1);
 
-        let internal_count = visitor.functions.iter()
+        let internal_count = visitor
+            .functions
+            .iter()
             .filter(|f| f.visibility == "internal")
             .count();
         assert!(internal_count >= 1);
