@@ -35,7 +35,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Internal crates
 codegraph = { path = "crates/codegraph", version = "0.2.0" }
-codegraph-parser-api = { path = "crates/codegraph-parser-api", version = "0.2.0" }
+codegraph-parser-api = { path = "crates/codegraph-parser-api", version = "0.2.1" }
 
 [profile.release]
 opt-level = 3
