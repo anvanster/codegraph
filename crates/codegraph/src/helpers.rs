@@ -431,6 +431,58 @@ pub fn get_file_dependents(graph: &CodeGraph, file_id: NodeId) -> Result<Vec<Nod
     Ok(dependents)
 }
 
+// ===== File Lookup Helpers =====
+
+/// Find a file node by its path.
+///
+/// Searches for a CodeFile node whose "path" property matches the given path string.
+///
+/// # Arguments
+///
+/// * `graph` - The code graph
+/// * `path` - The file path to search for (e.g., "src/main.rs")
+///
+/// # Returns
+///
+/// `Some(NodeId)` if a matching file node is found, `None` otherwise.
+pub fn find_file_by_path(graph: &CodeGraph, path: &str) -> Result<Option<NodeId>> {
+    let results = graph
+        .query()
+        .node_type(NodeType::CodeFile)
+        .property("path", path)
+        .limit(1)
+        .execute()?;
+
+    Ok(results.into_iter().next())
+}
+
+/// Convert a slice of node IDs to their corresponding file paths.
+///
+/// Looks up each node and extracts the "path" property. Nodes that don't exist
+/// or don't have a path property are silently skipped.
+///
+/// # Arguments
+///
+/// * `graph` - The code graph
+/// * `node_ids` - Slice of node IDs to resolve
+///
+/// # Returns
+///
+/// Vector of `(NodeId, String)` tuples for each successfully resolved node.
+pub fn node_ids_to_paths(graph: &CodeGraph, node_ids: &[NodeId]) -> Result<Vec<(NodeId, String)>> {
+    let mut result = Vec::with_capacity(node_ids.len());
+
+    for &id in node_ids {
+        if let Ok(node) = graph.get_node(id) {
+            if let Some(path) = node.properties.get_string("path") {
+                result.push((id, path.to_string()));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 // ===== Transitive Dependency Analysis =====
 
 /// Find all transitive dependencies of a file (what it imports, directly or indirectly).

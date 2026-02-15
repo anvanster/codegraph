@@ -492,6 +492,20 @@ impl CodeGraph {
         self.edges.len()
     }
 
+    /// Iterate over all nodes in the graph.
+    ///
+    /// Returns an iterator of `(NodeId, &Node)` pairs.
+    pub fn iter_nodes(&self) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.nodes.iter().map(|(&id, node)| (id, node))
+    }
+
+    /// Iterate over all edges in the graph.
+    ///
+    /// Returns an iterator of `(EdgeId, &Edge)` pairs.
+    pub fn iter_edges(&self) -> impl Iterator<Item = (EdgeId, &Edge)> {
+        self.edges.iter().map(|(&id, edge)| (id, edge))
+    }
+
     /// Clear all nodes and edges from the graph.
     ///
     /// This is a destructive operation that cannot be undone.
