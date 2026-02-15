@@ -334,10 +334,14 @@ impl<'a> TclVisitor<'a> {
                         body_node = Some(*child);
                     }
                 }
-                // When the body contains keywords, tree-sitter may parse it
-                // as an `arguments` node instead of `braced_word`.
-                "arguments" if found_proc && params_node.is_some() && body_node.is_none() => {
-                    body_node = Some(*child);
+                // `arguments` can be params (in procedure nodes) or body
+                // (when body contains keywords that flatten it).
+                "arguments" if found_proc && !name_str.is_empty() => {
+                    if params_node.is_none() {
+                        params_node = Some(*child);
+                    } else if body_node.is_none() {
+                        body_node = Some(*child);
+                    }
                 }
                 _ => {}
             }
@@ -383,6 +387,10 @@ impl<'a> TclVisitor<'a> {
 
         if let Some(bn) = body_node {
             self.visit_braced_body(bn);
+        } else if node.kind() == "ERROR" {
+            // Flat ERROR: all tokens are siblings. Scan for procs and commands
+            // between the `{` after the namespace name and its matching `}`.
+            self.visit_flat_error_body(node);
         }
 
         self.namespace_stack.pop();
@@ -420,6 +428,29 @@ impl<'a> TclVisitor<'a> {
         for child in &children {
             match child.kind() {
                 "namespace" => continue,
+                // Multi-line case: namespace node has a word_list child
+                // containing eval, name, and braced_word body.
+                "word_list" => {
+                    let mut ic = child.walk();
+                    for inner in child.children(&mut ic) {
+                        match inner.kind() {
+                            "simple_word" | "word" => {
+                                let text = self.node_text(inner).trim().to_string();
+                                if text == "eval" {
+                                    found_eval = true;
+                                } else if found_eval && ns_name.is_empty() {
+                                    ns_name = text;
+                                }
+                            }
+                            "braced_word" | "braced_word_simple"
+                                if found_eval && !ns_name.is_empty() && body_node.is_none() =>
+                            {
+                                body_node = Some(inner);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 "ERROR" => {
                     let mut ic = child.walk();
                     for inner in child.children(&mut ic) {
@@ -605,6 +636,179 @@ impl<'a> TclVisitor<'a> {
                 self.visit_braced_body(child);
             }
         }
+    }
+
+    /// Scan a flat ERROR node for proc definitions and commands.
+    ///
+    /// When tree-sitter-tcl flattens a namespace body into a single ERROR node,
+    /// all tokens (namespace, eval, name, {, proc, name, params, {, body, }, })
+    /// appear as siblings. This method finds the body region (between the first
+    /// `{` and its matching `}`) and scans for proc definitions and commands.
+    fn visit_flat_error_body(&mut self, node: Node) {
+        let mut cursor = node.walk();
+        let children: Vec<Node> = node.children(&mut cursor).collect();
+
+        // Find the opening `{` of the namespace body (skip past namespace/eval/name)
+        let mut body_start = None;
+        let mut brace_count = 0;
+        for (i, child) in children.iter().enumerate() {
+            if child.kind() == "{" {
+                brace_count += 1;
+                if brace_count == 1 {
+                    body_start = Some(i + 1);
+                    break;
+                }
+            }
+        }
+
+        let start = match body_start {
+            Some(s) => s,
+            None => return,
+        };
+
+        let mut depth = 1; // we're inside the first `{`
+        let mut i = start;
+        while i < children.len() && depth > 0 {
+            let kind = children[i].kind();
+            match kind {
+                "}" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    i += 1;
+                }
+                "{" => {
+                    depth += 1;
+                    i += 1;
+                }
+                "proc" if depth == 1 => {
+                    let consumed = self.visit_flat_proc(&children, i);
+                    i += consumed;
+                }
+                "command" => {
+                    self.visit_command(children[i]);
+                    i += 1;
+                }
+                _ => {
+                    // Check if this is a keyword token (set, if, etc.)
+                    if depth == 1 && TCL_KEYWORDS.contains(&kind) && kind != "proc" {
+                        self.record_call(kind, children[i]);
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// Extract a proc definition from flat sibling tokens.
+    ///
+    /// `tokens[proc_idx]` is the `proc` keyword. Scans forward for name,
+    /// params, and body. Returns the number of tokens consumed.
+    fn visit_flat_proc(&mut self, tokens: &[Node], proc_idx: usize) -> usize {
+        let mut i = proc_idx + 1; // skip "proc"
+        let mut name_str = String::new();
+        let mut params: Vec<Parameter> = Vec::new();
+
+        // Find name (skip ERROR/comment/whitespace nodes)
+        while i < tokens.len() {
+            match tokens[i].kind() {
+                "simple_word" | "word" if name_str.is_empty() => {
+                    name_str = self.node_text(tokens[i]).trim().to_string();
+                    i += 1;
+                    break;
+                }
+                "ERROR" | "comment" => {
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+
+        if name_str.is_empty() {
+            return i - proc_idx;
+        }
+
+        // Find params (arguments node or braced_word)
+        while i < tokens.len() {
+            match tokens[i].kind() {
+                "arguments" | "braced_word" | "braced_word_simple" => {
+                    params = self.extract_params_from_braced(tokens[i]);
+                    i += 1;
+                    break;
+                }
+                "ERROR" | "comment" => {
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+
+        // Find body: match { ... } with brace depth tracking
+        while i < tokens.len() && tokens[i].kind() != "{" {
+            i += 1;
+        }
+        if i >= tokens.len() {
+            return i - proc_idx;
+        }
+        let body_start = i + 1; // after opening {
+        i += 1;
+        let mut depth = 1;
+        while i < tokens.len() && depth > 0 {
+            match tokens[i].kind() {
+                "{" => depth += 1,
+                "}" => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        let body_end = i - 1; // before closing }
+
+        // Create the function entity
+        let qualified = self.qualified_name(&name_str);
+        let param_str = params
+            .iter()
+            .map(|p| {
+                if let Some(ref default) = p.default_value {
+                    format!("{{{} {}}}", p.name, default)
+                } else {
+                    p.name.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let signature = format!("proc {} {{{}}} {{...}}", name_str, param_str);
+
+        let proc_node = tokens[proc_idx];
+        let mut func = FunctionEntity::new(
+            &qualified,
+            proc_node.start_position().row + 1,
+            tokens.get(body_end).map_or(
+                proc_node.end_position().row + 1,
+                |n| n.end_position().row + 1,
+            ),
+        )
+        .with_visibility("public")
+        .with_signature(&signature);
+
+        func.parameters = params;
+        func.parent_class = self.current_namespace();
+        self.functions.push(func);
+
+        // Visit body tokens for nested calls
+        let prev_proc = self.current_procedure.take();
+        self.current_procedure = Some(qualified);
+        for token in &tokens[body_start..body_end] {
+            let kind = token.kind();
+            if kind == "command" {
+                self.visit_command(*token);
+            } else if TCL_KEYWORDS.contains(&kind) && kind != "proc" {
+                self.record_call(kind, *token);
+            }
+        }
+        self.current_procedure = prev_proc;
+
+        i - proc_idx
     }
 
     /// Visit an `arguments` node used as a proc body.
@@ -1073,6 +1277,216 @@ mod tests {
             visitor.calls.iter().any(|c| c.callee == "expr"),
             "expr should be recorded as a call, got: {:?}",
             visitor.calls.iter().map(|c| &c.callee).collect::<Vec<_>>()
+        );
+    }
+
+    // ── Integration tests: realistic Tcl source ────────────────────────
+    //
+    // NOTE: The tree-sitter-tcl grammar with ABI v15→v14 patch has
+    // cascading parse issues when multiple grammar keywords appear in
+    // deeply nested structures. These tests exercise each capability
+    // in isolation or small combinations that the parser handles well.
+
+    #[allow(dead_code)]
+    fn dump_ast(source: &[u8]) {
+        let mut parser = Parser::new();
+        let language = crate::ts_tcl::language();
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        fn dump(node: tree_sitter::Node, source: &[u8], indent: usize) {
+            let text = node.utf8_text(source).unwrap_or("");
+            let short = if text.len() > 80 { &text[..80] } else { text };
+            eprintln!(
+                "{}{} [{}] = {:?}",
+                " ".repeat(indent),
+                node.kind(),
+                node.child_count(),
+                short
+            );
+            let mut c = node.walk();
+            for child in node.children(&mut c) {
+                dump(child, source, indent + 2);
+            }
+        }
+        dump(tree.root_node(), source, 0);
+    }
+
+    #[test]
+    fn test_imports_and_packages() {
+        let source = br#"
+package require Tcl 8.6
+package require http
+source helpers.tcl
+source lib/utils.tcl
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert!(visitor.imports.iter().any(|i| i.imported == "Tcl"));
+        assert!(visitor.imports.iter().any(|i| i.imported == "http"));
+        assert!(visitor.imports.iter().any(|i| i.imported.contains("helpers.tcl")));
+        assert!(visitor.imports.iter().any(|i| i.imported.contains("lib/utils.tcl")));
+    }
+
+    #[test]
+    fn test_namespace_with_proc() {
+        // Namespace with a single proc inside — tests word_list/braced_word body path
+        let source = b"namespace eval utils {\n    proc add {a b} {\n        puts hello\n    }\n}";
+        let visitor = parse_and_visit(source);
+
+        assert!(
+            visitor.classes.iter().any(|c| c.name.contains("utils")),
+            "should find utils namespace, got: {:?}",
+            visitor.classes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+        assert!(
+            visitor.functions.iter().any(|f| f.name.contains("add")),
+            "should find add proc, got: {:?}",
+            visitor.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
+        );
+        // Proc should be namespace-qualified
+        if let Some(f) = visitor.functions.iter().find(|f| f.name.contains("add")) {
+            assert!(
+                f.name.contains("utils"),
+                "add should be qualified as utils::add, got: {}",
+                f.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_proc_with_control_flow() {
+        let source = b"proc check {x} {\n    if {$x > 0} {\n        puts positive\n    }\n}";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "check");
+        if let Some(ref c) = visitor.functions[0].complexity {
+            assert!(c.cyclomatic_complexity >= 2, "if should add complexity");
+            assert!(c.branches >= 1);
+        }
+    }
+
+    #[test]
+    fn test_proc_with_keywords_in_body() {
+        // Each keyword individually to verify they're recorded as calls
+        let sources: Vec<(&[u8], &str)> = vec![
+            (b"proc f {} {\n    set x 42\n}", "set"),
+            (b"proc f {} {\n    global myvar\n}", "global"),
+            (b"proc f {} {\n    expr {1 + 2}\n}", "expr"),
+        ];
+
+        for (source, expected_call) in sources {
+            let visitor = parse_and_visit(source);
+            assert_eq!(visitor.functions.len(), 1, "should find proc for {}", expected_call);
+            assert!(
+                visitor.calls.iter().any(|c| c.callee == expected_call),
+                "{} should be recorded as call, got: {:?}",
+                expected_call,
+                visitor.calls.iter().map(|c| &c.callee).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn test_proc_with_doc_comment() {
+        let source = b"# This is a greeting procedure\n# It says hello\nproc greet {name} {\n    puts hello\n}";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert_eq!(visitor.functions[0].name, "greet");
+        if let Some(ref doc) = visitor.functions[0].doc_comment {
+            assert!(doc.contains("greeting procedure"));
+        }
+    }
+
+    #[test]
+    fn test_proc_params_with_defaults() {
+        let source = b"proc connect {host {port 8080} {timeout 30}} {\n    puts ok\n}";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let f = &visitor.functions[0];
+        assert_eq!(f.name, "connect");
+        assert!(f.parameters.iter().any(|p| p.name == "host" && p.default_value.is_none()));
+        assert!(f.parameters.iter().any(|p| p.name == "port" && p.default_value == Some("8080".to_string())));
+        assert!(f.parameters.iter().any(|p| p.name == "timeout" && p.default_value == Some("30".to_string())));
+    }
+
+    #[test]
+    fn test_sdc_constraints() {
+        let source = br#"
+create_clock -name sys_clk -period 10.0 [get_ports clk]
+create_clock -name pll_clk -period 5.0 [get_ports pll_out]
+set_input_delay -clock sys_clk -max 2.0 [all_inputs]
+set_output_delay -clock sys_clk -max 3.0 [all_outputs]
+set_false_path -from [get_clocks pll_clk] -to [get_clocks sys_clk]
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert!(
+            visitor.sdc_data.clocks.len() >= 2,
+            "should find at least 2 clocks, got: {}",
+            visitor.sdc_data.clocks.len()
+        );
+        assert!(visitor.sdc_data.clocks.iter().any(|c| c.name == "sys_clk"));
+        assert!(visitor.sdc_data.clocks.iter().any(|c| c.name == "pll_clk"));
+    }
+
+    #[test]
+    fn test_eda_design_reads() {
+        let source = b"read_verilog top.v\nread_verilog design.v";
+        let visitor = parse_and_visit(source);
+
+        assert!(
+            visitor.eda_data.design_reads.len() >= 2,
+            "should find design reads, got: {:?}",
+            visitor.eda_data.design_reads
+        );
+        assert!(
+            visitor.imports.iter().any(|i| i.imported.contains("top.v")),
+            "should import top.v, got: {:?}",
+            visitor.imports.iter().map(|i| &i.imported).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_eda_tool_flow() {
+        let source = b"report_timing -delay_type max\nreport_area\ncompile_ultra";
+        let visitor = parse_and_visit(source);
+
+        let callees: Vec<&str> = visitor.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(callees.contains(&"report_timing"), "should record report_timing");
+        assert!(callees.contains(&"report_area"), "should record report_area");
+        assert!(callees.contains(&"compile_ultra"), "should record compile_ultra");
+    }
+
+    #[test]
+    fn test_multiline_procs_and_imports() {
+        // Multiple top-level procs with imports — exercises multi-command source
+        let source = br#"
+package require Tcl 8.6
+source helpers.tcl
+
+proc greet {name} {
+    puts "Hello $name"
+}
+
+proc add {a b} {
+    expr {$a + $b}
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        // Imports
+        assert!(visitor.imports.iter().any(|i| i.imported == "Tcl"));
+        assert!(visitor.imports.iter().any(|i| i.imported.contains("helpers.tcl")));
+
+        // Functions
+        let fn_names: Vec<&str> = visitor.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(
+            fn_names.contains(&"greet"),
+            "should find greet, got: {:?}", fn_names
         );
     }
 }
