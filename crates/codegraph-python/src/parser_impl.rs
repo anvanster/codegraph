@@ -210,9 +210,11 @@ impl PythonParser {
             let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
                 existing_id
             } else {
+                // Relative imports (from .foo, from ..bar) are internal
+                let is_external = !import.imported.starts_with('.');
                 let props = PropertyMap::new()
                     .with("name", imported_module.clone())
-                    .with("is_external", "true");
+                    .with("is_external", is_external.to_string());
 
                 let id = graph
                     .add_node(NodeType::Module, props)
@@ -526,6 +528,71 @@ mod tests {
             edge.edge_type,
             EdgeType::Implements,
             "Edge should be of type Implements"
+        );
+    }
+
+    #[test]
+    fn test_relative_import_is_internal() {
+        use codegraph::CodeGraph;
+        use codegraph_parser_api::{CodeIR, ImportRelation, ModuleEntity};
+        use std::path::PathBuf;
+
+        let parser = PythonParser::new();
+        let mut ir = CodeIR::new(PathBuf::from("test.py"));
+        ir.set_module(ModuleEntity::new("test", "test.py", "python"));
+        // Relative import: from .utils import foo
+        ir.add_import(ImportRelation::new("test", ".utils").with_symbols(vec!["foo".to_string()]));
+        // Absolute import: import os
+        ir.add_import(ImportRelation::new("test", "os"));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = parser
+            .ir_to_graph(&ir, &mut graph, Path::new("test.py"))
+            .unwrap();
+
+        assert_eq!(file_info.imports.len(), 2);
+
+        // .utils should be internal (is_external = false)
+        let utils_node = graph.get_node(file_info.imports[0]).unwrap();
+        assert_eq!(
+            utils_node.properties.get_string("is_external"),
+            Some("false"),
+            "Relative import .utils should be internal"
+        );
+
+        // os should be external (is_external = true)
+        let os_node = graph.get_node(file_info.imports[1]).unwrap();
+        assert_eq!(
+            os_node.properties.get_string("is_external"),
+            Some("true"),
+            "Absolute import os should be external"
+        );
+    }
+
+    #[test]
+    fn test_double_dot_relative_import_is_internal() {
+        use codegraph::CodeGraph;
+        use codegraph_parser_api::{CodeIR, ImportRelation, ModuleEntity};
+        use std::path::PathBuf;
+
+        let parser = PythonParser::new();
+        let mut ir = CodeIR::new(PathBuf::from("test.py"));
+        ir.set_module(ModuleEntity::new("test", "test.py", "python"));
+        // from ..models import Bar
+        ir.add_import(ImportRelation::new("test", "..models").with_symbols(vec!["Bar".to_string()]));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = parser
+            .ir_to_graph(&ir, &mut graph, Path::new("test.py"))
+            .unwrap();
+
+        assert_eq!(file_info.imports.len(), 1);
+
+        let node = graph.get_node(file_info.imports[0]).unwrap();
+        assert_eq!(
+            node.properties.get_string("is_external"),
+            Some("false"),
+            "Relative import ..models should be internal"
         );
     }
 }

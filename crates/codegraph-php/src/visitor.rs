@@ -82,6 +82,11 @@ impl<'a> PhpVisitor<'a> {
                 self.visit_use(node);
                 false
             }
+            "include_expression" | "include_once_expression"
+            | "require_expression" | "require_once_expression" => {
+                self.visit_include_require(node);
+                false
+            }
             "anonymous_function_creation_expression" | "arrow_function" => {
                 false // Skip anonymous functions
             }
@@ -434,6 +439,178 @@ impl<'a> PhpVisitor<'a> {
                 self.extract_use_clause(child);
             }
         }
+    }
+
+    fn visit_include_require(&mut self, node: Node) {
+        // Extract the file path from include/require expressions.
+        // Handles: string literals, parenthesized expressions, and binary_expression
+        // concatenations (e.g., ABSPATH . WPINC . '/version.php').
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "string" | "encapsed_string" => {
+                    let path = self.extract_string_content(child);
+                    if !path.is_empty() {
+                        self.push_include_import(path, false, node.kind());
+                    }
+                    return;
+                }
+                "binary_expression" => {
+                    self.handle_concat_include(child, node.kind());
+                    return;
+                }
+                "parenthesized_expression" => {
+                    let mut inner_cursor = child.walk();
+                    for inner in child.children(&mut inner_cursor) {
+                        match inner.kind() {
+                            "string" | "encapsed_string" => {
+                                let path = self.extract_string_content(inner);
+                                if !path.is_empty() {
+                                    self.push_include_import(path, false, node.kind());
+                                }
+                                return;
+                            }
+                            "binary_expression" => {
+                                self.handle_concat_include(inner, node.kind());
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Build the imported path from a concatenation expression and push an import.
+    fn handle_concat_include(&mut self, concat_node: Node, include_kind: &str) {
+        let mut string_parts: Vec<String> = Vec::new();
+        let mut has_dir_marker = false;
+        let mut has_dynamic_parts = false;
+        self.collect_concat_parts(concat_node, &mut string_parts, &mut has_dir_marker, &mut has_dynamic_parts);
+
+        if string_parts.is_empty() {
+            return;
+        }
+
+        let joined = string_parts.join("");
+
+        if has_dir_marker && !has_dynamic_parts {
+            // __DIR__ . '/config.php' or dirname(__FILE__) . '/helpers.php'
+            let path = if joined.starts_with('/') {
+                format!(".{}", joined)
+            } else {
+                format!("./{}", joined)
+            };
+            self.push_include_import(path, false, include_kind);
+        } else if !joined.is_empty() {
+            // Dynamic parts present — emit as suffix match
+            self.push_include_import(joined, true, include_kind);
+        }
+    }
+
+    /// Recursively walk a binary_expression tree collecting string literals
+    /// and detecting __DIR__/dirname(__FILE__) markers.
+    fn collect_concat_parts(
+        &self,
+        node: Node,
+        string_parts: &mut Vec<String>,
+        has_dir_marker: &mut bool,
+        has_dynamic_parts: &mut bool,
+    ) {
+        match node.kind() {
+            "binary_expression" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() != "." {
+                        self.collect_concat_parts(child, string_parts, has_dir_marker, has_dynamic_parts);
+                    }
+                }
+            }
+            "string" | "encapsed_string" => {
+                let content = self.extract_string_content(node);
+                if !content.is_empty() {
+                    string_parts.push(content);
+                }
+            }
+            "name" => {
+                let text = self.node_text(node);
+                if text == "__DIR__" {
+                    *has_dir_marker = true;
+                } else {
+                    *has_dynamic_parts = true;
+                }
+            }
+            "variable_name" => {
+                *has_dynamic_parts = true;
+            }
+            "function_call_expression" => {
+                if self.is_dirname_file_call(node) {
+                    *has_dir_marker = true;
+                } else {
+                    *has_dynamic_parts = true;
+                }
+            }
+            "parenthesized_expression" => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() != "(" && child.kind() != ")" {
+                        self.collect_concat_parts(child, string_parts, has_dir_marker, has_dynamic_parts);
+                    }
+                }
+            }
+            _ => {
+                *has_dynamic_parts = true;
+            }
+        }
+    }
+
+    /// Check if a function_call_expression is `dirname(__FILE__)`.
+    fn is_dirname_file_call(&self, node: Node) -> bool {
+        let mut cursor = node.walk();
+        let mut is_dirname = false;
+        let mut has_file_arg = false;
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "name" => {
+                    if self.node_text(child) == "dirname" {
+                        is_dirname = true;
+                    }
+                }
+                "arguments" => {
+                    let mut arg_cursor = child.walk();
+                    for arg in child.children(&mut arg_cursor) {
+                        if arg.kind() == "argument" || arg.kind() == "name" {
+                            let text = self.node_text(arg);
+                            if text == "__FILE__" || text.contains("__FILE__") {
+                                has_file_arg = true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        is_dirname && has_file_arg
+    }
+
+    /// Helper to push an include/require import.
+    fn push_include_import(&mut self, path: String, is_suffix: bool, include_kind: &str) {
+        let import = ImportRelation {
+            importer: "include_require".to_string(),
+            imported: path,
+            symbols: Vec::new(),
+            is_wildcard: is_suffix,
+            alias: Some(include_kind.to_string()),
+        };
+        self.imports.push(import);
+    }
+
+    fn extract_string_content(&self, node: Node) -> String {
+        let text = self.node_text(node);
+        // Remove quotes: 'file.php' or "file.php"
+        text.trim_matches(|c| c == '\'' || c == '"').to_string()
     }
 
     fn extract_use_clause(&mut self, node: Node) {
@@ -1045,5 +1222,159 @@ function helper() {}
         assert_eq!(visitor.calls[0].callee, "helper");
         assert_eq!(visitor.calls[0].call_site_line, 3);
         assert!(visitor.calls[0].is_direct);
+    }
+
+    #[test]
+    fn test_visitor_include_require() {
+        let source = b"<?php
+include 'helpers.php';
+require 'config.php';
+include_once 'db.php';
+require_once 'auth.php';
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.imports.len(), 4);
+        assert_eq!(visitor.imports[0].imported, "helpers.php");
+        assert_eq!(visitor.imports[0].importer, "include_require");
+        assert_eq!(visitor.imports[0].alias, Some("include_expression".to_string()));
+
+        assert_eq!(visitor.imports[1].imported, "config.php");
+        assert_eq!(visitor.imports[1].alias, Some("require_expression".to_string()));
+
+        assert_eq!(visitor.imports[2].imported, "db.php");
+        assert_eq!(visitor.imports[2].alias, Some("include_once_expression".to_string()));
+
+        assert_eq!(visitor.imports[3].imported, "auth.php");
+        assert_eq!(visitor.imports[3].alias, Some("require_once_expression".to_string()));
+    }
+
+    #[test]
+    fn test_visitor_include_with_parens() {
+        let source = b"<?php
+require('lib/helper.php');
+include_once('utils/format.php');
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.imports.len(), 2);
+        assert_eq!(visitor.imports[0].imported, "lib/helper.php");
+        assert_eq!(visitor.imports[1].imported, "utils/format.php");
+    }
+
+    #[test]
+    fn test_visitor_include_with_relative_path() {
+        let source = b"<?php
+require '../config.php';
+include './helpers/utils.php';
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.imports.len(), 2);
+        assert_eq!(visitor.imports[0].imported, "../config.php");
+        assert_eq!(visitor.imports[1].imported, "./helpers/utils.php");
+    }
+
+    #[test]
+    fn test_visitor_include_and_use_combined() {
+        let source = b"<?php
+use App\\Models\\User;
+require_once 'vendor/autoload.php';
+include 'helpers.php';
+";
+        let visitor = parse_and_visit(source);
+
+        // 1 namespace use + 2 include/require
+        assert_eq!(visitor.imports.len(), 3);
+        // Namespace use comes first in source order
+        assert_eq!(visitor.imports[0].imported, "App\\Models\\User");
+        assert_eq!(visitor.imports[0].importer, "global"); // namespace use
+        assert_eq!(visitor.imports[1].imported, "vendor/autoload.php");
+        assert_eq!(visitor.imports[1].importer, "include_require");
+        assert_eq!(visitor.imports[2].imported, "helpers.php");
+        assert_eq!(visitor.imports[2].importer, "include_require");
+    }
+
+    // --- Dynamic concatenation tests ---
+
+    #[test]
+    fn test_visitor_include_concat_dir_magic() {
+        let source = b"<?php\nrequire __DIR__ . '/config.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "./config.php");
+        assert_eq!(visitor.imports[0].importer, "include_require");
+        assert!(!visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_dirname_file() {
+        let source = b"<?php\ninclude dirname(__FILE__) . '/helpers.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "./helpers.php");
+        assert!(!visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_constants() {
+        let source = b"<?php\nrequire ABSPATH . WPINC . '/version.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "/version.php");
+        assert!(visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_constant_with_path() {
+        let source = b"<?php\nrequire ABSPATH . 'wp-admin/includes/file.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "wp-admin/includes/file.php");
+        assert!(visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_variable() {
+        let source = b"<?php\nrequire $basePath . '/config.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "/config.php");
+        assert!(visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_multiple_strings() {
+        let source = b"<?php\nrequire ABSPATH . 'wp-admin' . '/' . 'file.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "wp-admin/file.php");
+        assert!(visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_fully_dynamic() {
+        let source = b"<?php\nrequire $dynamic_path;\n";
+        let visitor = parse_and_visit(source);
+        // Fully dynamic — no string parts, should be skipped
+        assert_eq!(visitor.imports.len(), 0);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_with_parens() {
+        let source = b"<?php\nrequire(ABSPATH . '/wp-settings.php');\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "/wp-settings.php");
+        assert!(visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_include_concat_dir_no_slash() {
+        let source = b"<?php\nrequire __DIR__ . 'config.php';\n";
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 1);
+        assert_eq!(visitor.imports[0].imported, "./config.php");
+        assert!(!visitor.imports[0].is_wildcard);
     }
 }

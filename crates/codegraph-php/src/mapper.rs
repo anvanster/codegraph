@@ -202,9 +202,21 @@ pub fn ir_to_graph(
         let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
             existing_id
         } else {
-            let props = PropertyMap::new()
+            let is_include = import.importer == "include_require";
+            // include/require are local file references; namespace use statements are external
+            let is_external = !is_include;
+            let mut props = PropertyMap::new()
                 .with("name", imported_module.clone())
-                .with("is_external", "true");
+                .with("is_external", is_external.to_string());
+            if is_include {
+                props = props.with("is_include", "true");
+                if let Some(ref kind) = import.alias {
+                    props = props.with("include_type", kind.clone());
+                }
+                if import.is_wildcard {
+                    props = props.with("is_suffix_match", "true");
+                }
+            }
 
             let id = graph
                 .add_node(NodeType::Module, props)
@@ -526,6 +538,82 @@ mod tests {
             edge.edge_type,
             EdgeType::Extends,
             "Edge should be of type Extends"
+        );
+    }
+
+    #[test]
+    fn test_ir_to_graph_include_require_is_local() {
+        let mut ir = CodeIR::new(PathBuf::from("test.php"));
+        // Simulate include/require: importer = "include_require", alias = include type
+        let mut include_import = ImportRelation::new("include_require", "helpers.php");
+        include_import.alias = Some("include_expression".to_string());
+        ir.add_import(include_import);
+
+        // Simulate namespace use: importer = "global"
+        ir.add_import(ImportRelation::new("global", "App\\Models\\User"));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.php").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        assert_eq!(file_info.imports.len(), 2);
+
+        // include/require should be internal
+        let include_node = graph.get_node(file_info.imports[0]).unwrap();
+        assert_eq!(
+            include_node.properties.get_string("is_external"),
+            Some("false"),
+            "include/require should be marked as internal"
+        );
+        assert_eq!(
+            include_node.properties.get_string("is_include"),
+            Some("true"),
+            "include/require should have is_include=true"
+        );
+        assert_eq!(
+            include_node.properties.get_string("include_type"),
+            Some("include_expression"),
+            "include type should be preserved"
+        );
+
+        // namespace use should be external
+        let use_node = graph.get_node(file_info.imports[1]).unwrap();
+        assert_eq!(
+            use_node.properties.get_string("is_external"),
+            Some("true"),
+            "namespace use should be marked as external"
+        );
+    }
+
+    #[test]
+    fn test_ir_to_graph_include_suffix_match() {
+        let mut ir = CodeIR::new(PathBuf::from("test.php"));
+        let mut include_import = ImportRelation::new("include_require", "/version.php");
+        include_import.alias = Some("require_expression".to_string());
+        include_import.is_wildcard = true; // suffix match from concatenation
+        ir.add_import(include_import);
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.php").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        assert_eq!(file_info.imports.len(), 1);
+
+        let module_node = graph.get_node(file_info.imports[0]).unwrap();
+        assert_eq!(
+            module_node.properties.get_string("is_suffix_match"),
+            Some("true"),
+            "Suffix match should be marked on Module node"
+        );
+        assert_eq!(
+            module_node.properties.get_string("is_include"),
+            Some("true"),
+        );
+        assert_eq!(
+            module_node.properties.get_string("is_external"),
+            Some("false"),
         );
     }
 }
