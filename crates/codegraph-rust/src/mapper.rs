@@ -175,19 +175,26 @@ pub fn ir_to_graph(
     // Add import nodes and relationships
     for import in &ir.imports {
         let imported_module = &import.imported;
+        let is_mod = import.importer == "mod_declaration";
 
         // Create or get module node
         let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
             existing_id
         } else {
             // Determine if this is an external or internal module
-            let is_external = !imported_module.starts_with("super::")
-                && !imported_module.starts_with("crate::")
-                && !imported_module.starts_with("self::");
+            // mod declarations always reference local files
+            let is_external = if is_mod {
+                false
+            } else {
+                !imported_module.starts_with("super::")
+                    && !imported_module.starts_with("crate::")
+                    && !imported_module.starts_with("self::")
+            };
 
             let props = PropertyMap::new()
                 .with("name", imported_module.clone())
-                .with("is_external", is_external.to_string());
+                .with("is_external", is_external.to_string())
+                .with("is_mod_declaration", is_mod.to_string());
 
             let id = graph
                 .add_node(NodeType::Module, props)

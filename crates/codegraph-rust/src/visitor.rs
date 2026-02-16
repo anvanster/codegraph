@@ -66,6 +66,7 @@ impl<'a> RustVisitor<'a> {
                 return;
             }
             "use_declaration" => self.visit_use(node),
+            "mod_item" => self.visit_mod(node),
             _ => {}
         }
 
@@ -554,6 +555,33 @@ impl<'a> RustVisitor<'a> {
             self.imports.push(import);
         }
     }
+
+    /// Visit a mod declaration (`mod foo;`)
+    ///
+    /// Skips inline mods (`mod foo { ... }`) since they don't reference external files.
+    /// Uses `importer: "mod_declaration"` as a marker to distinguish from `use` imports.
+    fn visit_mod(&mut self, node: Node) {
+        // Skip inline mods — they have a body (declaration_list child)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "declaration_list" {
+                return;
+            }
+        }
+
+        // Extract module name
+        if let Some(name_node) = node.child_by_field_name("name") {
+            let module_name = self.node_text(name_node);
+            let import = ImportRelation {
+                importer: "mod_declaration".to_string(),
+                imported: module_name,
+                symbols: Vec::new(),
+                is_wildcard: false,
+                alias: None,
+            };
+            self.imports.push(import);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -744,6 +772,40 @@ pub(crate) fn crate_fn() {}
             .filter(|f| f.visibility == "internal")
             .count();
         assert!(internal_count >= 1);
+    }
+
+    #[test]
+    fn test_visitor_mod_declarations() {
+        let source = r#"
+mod scanner;
+pub mod codegraph_parsers;
+mod inline {
+    fn foo() {}
+}
+"#;
+        let visitor = parse_and_visit(source);
+        // Should have 2 imports (inline mod skipped)
+        assert_eq!(visitor.imports.len(), 2);
+        assert_eq!(visitor.imports[0].imported, "scanner");
+        assert_eq!(visitor.imports[0].importer, "mod_declaration");
+        assert_eq!(visitor.imports[1].imported, "codegraph_parsers");
+        assert_eq!(visitor.imports[1].importer, "mod_declaration");
+    }
+
+    #[test]
+    fn test_visitor_mod_and_use() {
+        let source = r#"
+mod scanner;
+use crate::graph::scanner::FileScanner;
+"#;
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.imports.len(), 2);
+        // mod declaration
+        assert_eq!(visitor.imports[0].importer, "mod_declaration");
+        assert_eq!(visitor.imports[0].imported, "scanner");
+        // use statement
+        assert_eq!(visitor.imports[1].importer, "current_module");
+        assert_eq!(visitor.imports[1].imported, "crate::graph::scanner::FileScanner");
     }
 
     #[test]
