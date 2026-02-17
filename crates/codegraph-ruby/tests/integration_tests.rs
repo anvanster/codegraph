@@ -1,6 +1,6 @@
 //! Integration tests for Ruby parser
 
-use codegraph::CodeGraph;
+use codegraph::{CodeGraph, NodeType};
 use codegraph_parser_api::CodeParser;
 use codegraph_ruby::RubyParser;
 use std::path::Path;
@@ -217,4 +217,53 @@ fn test_parse_sample_app_summary() {
     assert!(!file_info.classes.is_empty());
     assert!(!file_info.traits.is_empty());
     assert!(!file_info.functions.is_empty());
+}
+
+#[test]
+fn test_require_vs_require_relative_is_external() {
+    let source = r#"
+require 'json'
+require 'net/http'
+require_relative './helper'
+require_relative '../lib/utils'
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = RubyParser::new();
+    let result = parser.parse_source(source, Path::new("test.rb"), &mut graph);
+    assert!(result.is_ok());
+
+    let file_info = result.unwrap();
+    assert_eq!(file_info.imports.len(), 4);
+
+    // Check Module nodes for is_external property
+    let module_ids = graph.query().node_type(NodeType::Module).execute().unwrap();
+    assert_eq!(module_ids.len(), 4);
+
+    let mut external_count = 0;
+    let mut relative_count = 0;
+
+    for id in &module_ids {
+        let node = graph.get_node(*id).unwrap();
+        let name = node.properties.get_string("name").unwrap();
+        let is_external = node
+            .properties
+            .get_string("is_external")
+            .map_or(false, |v| v == "true");
+
+        match name {
+            "json" | "net/http" => {
+                assert!(is_external, "'{}' should be external", name);
+                external_count += 1;
+            }
+            "./helper" | "../lib/utils" => {
+                assert!(!is_external, "'{}' should not be external", name);
+                relative_count += 1;
+            }
+            _ => panic!("Unexpected module: {}", name),
+        }
+    }
+
+    assert_eq!(external_count, 2, "Expected 2 external requires");
+    assert_eq!(relative_count, 2, "Expected 2 require_relative");
 }

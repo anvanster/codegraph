@@ -493,24 +493,42 @@ impl<'a> CppVisitor<'a> {
     }
 
     fn visit_include(&mut self, node: Node) {
+        let mut path = String::new();
+        let mut is_system = false;
+
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "string_literal" || child.kind() == "system_lib_string" {
-                let path = self.node_text(child);
-                let path = path
-                    .trim_start_matches(['"', '<'])
-                    .trim_end_matches(['"', '>']);
-
-                let import = ImportRelation {
-                    importer: "file".to_string(),
-                    imported: path.to_string(),
-                    symbols: Vec::new(),
-                    is_wildcard: false,
-                    alias: None,
-                };
-                self.imports.push(import);
-                return;
+            match child.kind() {
+                "system_lib_string" => {
+                    path = self.node_text(child);
+                    path = path
+                        .trim_start_matches('<')
+                        .trim_end_matches('>')
+                        .to_string();
+                    is_system = true;
+                }
+                "string_literal" => {
+                    path = self.node_text(child);
+                    path = path.trim_matches('"').to_string();
+                    is_system = false;
+                }
+                _ => {}
             }
+        }
+
+        if !path.is_empty() {
+            let import = ImportRelation {
+                importer: "file".to_string(),
+                imported: path,
+                symbols: Vec::new(),
+                is_wildcard: true,
+                alias: if is_system {
+                    Some("system".to_string())
+                } else {
+                    None
+                },
+            };
+            self.imports.push(import);
         }
     }
 

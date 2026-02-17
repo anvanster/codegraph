@@ -1,6 +1,6 @@
 //! Integration tests for the C++ parser
 
-use codegraph::CodeGraph;
+use codegraph::{CodeGraph, NodeType};
 use codegraph_cpp::CppParser;
 use codegraph_parser_api::CodeParser;
 use std::path::Path;
@@ -247,4 +247,55 @@ struct Point {
         "Expected 1 struct/class, found {}",
         file_info.classes.len()
     );
+}
+
+#[test]
+fn test_include_system_vs_local_distinction() {
+    let source = r#"
+#include <iostream>
+#include <vector>
+#include "myheader.h"
+#include "utils/helpers.h"
+
+void test() {}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CppParser::new();
+    let result = parser.parse_source(source, Path::new("test.cpp"), &mut graph);
+    assert!(result.is_ok());
+
+    let file_info = result.unwrap();
+    assert_eq!(file_info.imports.len(), 4);
+
+    // Check Module nodes in the graph for is_system property
+    let module_ids = graph.query().node_type(NodeType::Module).execute().unwrap();
+    assert_eq!(module_ids.len(), 4);
+
+    let mut system_count = 0;
+    let mut local_count = 0;
+
+    for id in &module_ids {
+        let node = graph.get_node(*id).unwrap();
+        let name = node.properties.get_string("name").unwrap();
+        let is_system = node
+            .properties
+            .get_string("is_system")
+            .map_or(false, |v| v == "true");
+
+        match name {
+            "iostream" | "vector" => {
+                assert!(is_system, "System include '{}' should have is_system=true", name);
+                system_count += 1;
+            }
+            "myheader.h" | "utils/helpers.h" => {
+                assert!(!is_system, "Local include '{}' should not have is_system", name);
+                local_count += 1;
+            }
+            _ => panic!("Unexpected module: {}", name),
+        }
+    }
+
+    assert_eq!(system_count, 2, "Expected 2 system includes");
+    assert_eq!(local_count, 2, "Expected 2 local includes");
 }

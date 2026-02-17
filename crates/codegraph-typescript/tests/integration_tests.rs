@@ -1,6 +1,6 @@
 //! Integration tests for codegraph-typescript parser
 
-use codegraph::CodeGraph;
+use codegraph::{CodeGraph, NodeType};
 use codegraph_parser_api::CodeParser;
 use codegraph_typescript::TypeScriptParser;
 use std::path::Path;
@@ -546,4 +546,58 @@ class Service {
     assert_eq!(info.classes.len(), 1);
     assert!(!info.functions.is_empty()); // log function
                                          // Note: Method extraction not yet implemented in TypeScript visitor
+}
+
+#[test]
+fn test_triple_slash_reference_path() {
+    let source = r#"/// <reference path="./types.d.ts" />
+/// <reference path="../globals.d.ts" />
+
+import { Something } from './something';
+
+function hello(): void {
+    console.log("Hello");
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = TypeScriptParser::new();
+    let result = parser.parse_source(source, Path::new("test.ts"), &mut graph);
+    assert!(result.is_ok());
+
+    let info = result.unwrap();
+    // 2 reference directives + 1 import statement = 3 Module nodes
+    let module_ids = graph.query().node_type(NodeType::Module).execute().unwrap();
+    assert_eq!(module_ids.len(), 3, "Expected 3 modules, found {}", module_ids.len());
+
+    // Check that the reference paths are present
+    let mut ref_paths: Vec<String> = Vec::new();
+    for id in &module_ids {
+        let node = graph.get_node(*id).unwrap();
+        let name = node.properties.get_string("name").unwrap().to_string();
+        if name == "./types.d.ts" || name == "../globals.d.ts" {
+            ref_paths.push(name);
+        }
+    }
+    ref_paths.sort();
+    assert_eq!(ref_paths, vec!["../globals.d.ts", "./types.d.ts"]);
+}
+
+#[test]
+fn test_triple_slash_types_reference_not_captured() {
+    let source = r#"/// <reference types="node" />
+/// This is a regular comment
+// Another comment
+
+function hello(): void {}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = TypeScriptParser::new();
+    let result = parser.parse_source(source, Path::new("test.ts"), &mut graph);
+    assert!(result.is_ok());
+
+    // types= references should NOT be captured, and regular comments should be ignored
+    let module_ids = graph.query().node_type(NodeType::Module).execute().unwrap();
+    assert_eq!(module_ids.len(), 0, "Expected 0 modules from types refs and comments");
 }

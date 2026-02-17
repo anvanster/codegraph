@@ -388,13 +388,12 @@ impl<'a> RubyVisitor<'a> {
                         imported,
                         symbols: Vec::new(),
                         is_wildcard: false,
-                        alias: None,
+                        alias: if method_name == "require_relative" {
+                            Some("require_relative".to_string())
+                        } else {
+                            None
+                        },
                     };
-
-                    // Mark require_relative differently if needed
-                    if method_name == "require_relative" {
-                        // Could add attribute to distinguish
-                    }
 
                     self.imports.push(import);
                 }
@@ -654,6 +653,18 @@ mod tests {
         assert_eq!(visitor.imports.len(), 2);
         assert_eq!(visitor.imports[0].imported, "json");
         assert_eq!(visitor.imports[1].imported, "./helper");
+    }
+
+    #[test]
+    fn test_visitor_require_vs_require_relative_alias() {
+        let source = b"require 'json'\nrequire_relative './helper'";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.imports.len(), 2);
+        // require → alias is None (external gem)
+        assert_eq!(visitor.imports[0].alias, None);
+        // require_relative → alias marks it as relative
+        assert_eq!(visitor.imports[1].alias, Some("require_relative".to_string()));
     }
 
     #[test]

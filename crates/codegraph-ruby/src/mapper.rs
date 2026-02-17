@@ -202,9 +202,11 @@ pub fn ir_to_graph(
         let import_id = if let Some(&existing_id) = node_map.get(imported_module) {
             existing_id
         } else {
+            let is_relative = import.alias.as_deref() == Some("require_relative");
+
             let props = PropertyMap::new()
                 .with("name", imported_module.clone())
-                .with("is_external", "true");
+                .with("is_external", if is_relative { "false" } else { "true" });
 
             let id = graph
                 .add_node(NodeType::Module, props)

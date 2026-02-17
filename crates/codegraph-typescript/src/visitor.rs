@@ -67,6 +67,9 @@ impl<'a> TypeScriptVisitor<'a> {
             "import_statement" => {
                 self.visit_import(node);
             }
+            "comment" => {
+                self.visit_comment(node);
+            }
             "call_expression" => {
                 self.visit_call_expression(node);
                 // Also recurse into call expression children (e.g., nested calls)
@@ -360,6 +363,43 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         self.imports.push(import);
+    }
+
+    fn visit_comment(&mut self, node: Node) {
+        let text = self.node_text(node);
+
+        // Only process triple-slash directives
+        if !text.starts_with("///") {
+            return;
+        }
+
+        // Extract path from: /// <reference path="./types.d.ts" />
+        // Skip types references (external type packages)
+        if let Some(path) = Self::extract_reference_path(&text) {
+            let import = ImportRelation {
+                importer: "current_module".to_string(),
+                imported: path,
+                symbols: Vec::new(),
+                is_wildcard: false,
+                alias: Some("reference".to_string()),
+            };
+            self.imports.push(import);
+        }
+    }
+
+    fn extract_reference_path(comment: &str) -> Option<String> {
+        // Match: /// <reference path="..." />
+        let path_marker = "path=\"";
+        if let Some(start) = comment.find(path_marker) {
+            let rest = &comment[start + path_marker.len()..];
+            if let Some(end) = rest.find('"') {
+                let path = &rest[..end];
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+        None
     }
 
     fn extract_named_imports(&self, node: Node) -> Vec<String> {
