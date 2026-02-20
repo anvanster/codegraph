@@ -4,7 +4,7 @@
 //! - Strict mode: Fails on syntax errors (default, for clean code)
 //! - Tolerant mode: Extracts what it can even with errors (for real-world code)
 
-use codegraph_parser_api::{CodeIR, ModuleEntity, ParserConfig, ParserError};
+use codegraph_parser_api::{CallRelation, CodeIR, ModuleEntity, ParserConfig, ParserError};
 use std::path::Path;
 use tree_sitter::Parser;
 
@@ -148,8 +148,14 @@ pub fn extract_with_options(
     ir.classes = visitor.structs;
     ir.imports = visitor.imports;
 
-    // Store call relationships in a custom way (we'll add this to IR later)
-    // For now, calls are stored as part of function entities
+    ir.calls = visitor
+        .calls
+        .into_iter()
+        .filter_map(|call| {
+            call.caller
+                .map(|caller| CallRelation::new(caller, call.callee, call.line))
+        })
+        .collect();
 
     Ok(ExtractionResult {
         ir,

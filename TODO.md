@@ -8,12 +8,6 @@ _(none — all items completed)_
 
 ## Medium Priority
 
-### 5. Dead `#[allow(dead_code)]` across visitor modules
-- Originally noted for codegraph-python `VisitorContext` — still only used in tests, not in extractor
-- Pattern is widespread: `#[allow(dead_code)]` found in 11 of 13 parser visitor modules
-- Decision per parser: integrate dead structs into extractors, or remove them
-- Python, Kotlin, Tcl, Ruby have the most suppressed items
-
 ### 6. Expand test coverage for recent features
 - cpp: system include distinction (`is_system` property) — added in `1256a12`
 - ruby: `require_relative` tracking — added in `1256a12`
@@ -28,6 +22,12 @@ _(none — all items completed)_
 - Position-0 splitting is worked around with sibling-stitching in visitor
 - Consider: upstream grammar fix, or switching to a maintained grammar fork
 - Collapsed word_list and fragmented body issues are handled but fragile
+
+### 12. Missing Calls edge extraction in Rust and Go parsers
+- Rust visitor has no `call_expression` handling — `.calls` vec is never populated
+- Go visitor has no call extraction at all — no `.calls.push` anywhere
+- C was fixed (visitor extracts, extractor transfers to `ir.calls`)
+- All other 10 parsers produce Calls edges correctly
 
 ## Future
 
@@ -70,8 +70,16 @@ _(none — all items completed)_
 - 12 of 13 parsers now enforce strict syntax error checking; TCL documented as exception
 - Added `test_syntax_error` integration tests to all 7 parsers
 
+### ~~5. Dead `#[allow(dead_code)]` across visitor modules~~
+- Removed unused `config: ParserConfig` field from 11 visitors (all except Rust) (`9e396b1`)
+- Removed debug `print_tree`/`dump_ast` helpers + their test callers from Kotlin, Ruby, Tcl
+- Removed dead Python `VisitorContext`, `type_to_string`, `default_to_string`
+- Updated C `extract_with_options` signature (removed config param) and doctest
+- 3 intentional annotations remain: EdaCommand enum (write-only fields), C Ifdef/Ifndef fields
+- 25 files changed, -249 lines net
+
 ## Workspace Health
 
-- **Total tests**: 1019 passing, 0 failing
+- **Total tests**: 1015 passing, 0 failing
 - **Crates**: 15 (core + parser-api + 13 language parsers)
 - **Clippy**: clean

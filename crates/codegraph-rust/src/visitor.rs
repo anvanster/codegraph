@@ -21,6 +21,7 @@ pub struct RustVisitor<'a> {
     pub implementations: Vec<ImplementationRelation>,
     pub inheritance: Vec<InheritanceRelation>,
     current_class: Option<String>,
+    current_function: Option<String>,
 }
 
 impl<'a> RustVisitor<'a> {
@@ -36,6 +37,7 @@ impl<'a> RustVisitor<'a> {
             implementations: Vec::new(),
             inheritance: Vec::new(),
             current_class: None,
+            current_function: None,
         }
     }
 
@@ -51,6 +53,8 @@ impl<'a> RustVisitor<'a> {
                 // Only visit top-level functions (not inside impl/trait blocks)
                 if self.current_class.is_none() {
                     self.visit_function(node);
+                    // Don't recurse — visit_function handles body for call extraction
+                    return;
                 }
             }
             "struct_item" => self.visit_struct(node),
@@ -67,6 +71,7 @@ impl<'a> RustVisitor<'a> {
             }
             "use_declaration" => self.visit_use(node),
             "mod_item" => self.visit_mod(node),
+            "call_expression" => self.visit_call_expression(node),
             _ => {}
         }
 
@@ -260,10 +265,15 @@ impl<'a> RustVisitor<'a> {
             .map(|n| self.node_text(n))
             .unwrap_or_else(|| "anonymous".to_string());
 
+        // Set current function context for call extraction
+        let previous_function = self.current_function.clone();
+        self.current_function = Some(name.clone());
+
         let visibility = self.extract_visibility(node);
 
         // Skip private functions if configured
         if self.config.skip_private && visibility == "private" {
+            self.current_function = previous_function;
             return;
         }
 
@@ -271,6 +281,7 @@ impl<'a> RustVisitor<'a> {
 
         // Skip test functions if configured
         if self.config.skip_tests && is_test {
+            self.current_function = previous_function;
             return;
         }
 
@@ -293,6 +304,13 @@ impl<'a> RustVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        // Visit body for call extraction
+        if let Some(body) = node.child_by_field_name("body") {
+            self.visit_body_for_calls(body);
+        }
+
+        self.current_function = previous_function;
     }
 
     /// Visit a struct declaration
@@ -513,7 +531,7 @@ impl<'a> RustVisitor<'a> {
                     let is_static = !parameters.iter().any(|p| p.name == "self");
 
                     let func = FunctionEntity {
-                        name: method_name,
+                        name: method_name.clone(),
                         signature: self.extract_signature(child),
                         visibility,
                         line_start: child.start_position().row + 1,
@@ -531,6 +549,14 @@ impl<'a> RustVisitor<'a> {
                     };
 
                     self.functions.push(func);
+
+                    // Extract calls from method body
+                    let previous_function = self.current_function.clone();
+                    self.current_function = Some(method_name);
+                    if let Some(body) = child.child_by_field_name("body") {
+                        self.visit_body_for_calls(body);
+                    }
+                    self.current_function = previous_function;
                 }
             }
         }
@@ -554,6 +580,64 @@ impl<'a> RustVisitor<'a> {
             };
 
             self.imports.push(import);
+        }
+    }
+
+    /// Visit a call expression and record the caller→callee relationship
+    fn visit_call_expression(&mut self, node: Node) {
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        let callee = self.extract_callee_name(node);
+        if callee.is_empty() || callee == "self" {
+            return;
+        }
+
+        self.calls.push(CallRelation::new(
+            caller,
+            callee,
+            node.start_position().row + 1,
+        ));
+    }
+
+    /// Extract the callee function name from a call expression node
+    fn extract_callee_name(&self, node: Node) -> String {
+        if let Some(func_node) = node.child_by_field_name("function") {
+            match func_node.kind() {
+                "identifier" => self.node_text(func_node),
+                "scoped_identifier" => {
+                    // e.g., std::mem::swap — take last segment
+                    if let Some(name) = func_node.child_by_field_name("name") {
+                        self.node_text(name)
+                    } else {
+                        self.node_text(func_node)
+                    }
+                }
+                "field_expression" => {
+                    // e.g., self.method() or obj.method()
+                    if let Some(field) = func_node.child_by_field_name("field") {
+                        self.node_text(field)
+                    } else {
+                        self.node_text(func_node)
+                    }
+                }
+                _ => self.node_text(func_node),
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    /// Recursively visit a node's children looking for call expressions
+    fn visit_body_for_calls(&mut self, node: Node) {
+        if node.kind() == "call_expression" {
+            self.visit_call_expression(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_body_for_calls(child);
         }
     }
 
@@ -854,5 +938,76 @@ impl Struct1 {
         assert_eq!(visitor.functions[0].line_start, 1);
         assert_eq!(visitor.functions[1].name, "second");
         assert_eq!(visitor.functions[1].line_start, 3);
+    }
+
+    #[test]
+    fn test_visitor_call_extraction() {
+        let source = r#"
+fn caller() {
+    callee();
+    other_func(42);
+}
+
+fn callee() {}
+fn other_func(x: i32) {}
+"#;
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.calls.len(), 2, "Should extract 2 calls");
+        assert_eq!(visitor.calls[0].caller, "caller");
+        assert_eq!(visitor.calls[0].callee, "callee");
+        assert_eq!(visitor.calls[1].caller, "caller");
+        assert_eq!(visitor.calls[1].callee, "other_func");
+    }
+
+    #[test]
+    fn test_visitor_method_call_extraction() {
+        let source = r#"
+struct Foo;
+
+impl Foo {
+    fn method(&self) {
+        self.other();
+        helper();
+    }
+
+    fn other(&self) {}
+}
+
+fn helper() {}
+"#;
+        let visitor = parse_and_visit(source);
+        assert!(
+            visitor.calls.len() >= 2,
+            "Should extract calls from impl methods, got {}",
+            visitor.calls.len()
+        );
+        let callers: Vec<&str> = visitor.calls.iter().map(|c| c.caller.as_str()).collect();
+        assert!(callers.contains(&"method"));
+    }
+
+    #[test]
+    fn test_visitor_scoped_call_extraction() {
+        let source = r#"
+fn caller() {
+    std::mem::swap(&mut a, &mut b);
+}
+"#;
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.calls.len(), 1);
+        assert_eq!(visitor.calls[0].caller, "caller");
+        assert_eq!(visitor.calls[0].callee, "swap");
+    }
+
+    #[test]
+    fn test_visitor_no_calls_outside_function() {
+        let source = r#"
+fn standalone() {}
+"#;
+        let visitor = parse_and_visit(source);
+        assert_eq!(
+            visitor.calls.len(),
+            0,
+            "No calls outside of function bodies"
+        );
     }
 }

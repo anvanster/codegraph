@@ -1,6 +1,6 @@
 [package]
 name = "codegraph-python"
-version = "0.4.1"
+version = "0.4.2"
 edition.workspace = true
 rust-version = "1.75"
 authors.workspace = true

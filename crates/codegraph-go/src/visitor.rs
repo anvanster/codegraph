@@ -1,6 +1,8 @@
 //! AST visitor for extracting Go entities
 
-use codegraph_parser_api::{ClassEntity, FunctionEntity, ImportRelation, TraitEntity};
+use codegraph_parser_api::{
+    CallRelation, ClassEntity, FunctionEntity, ImportRelation, TraitEntity,
+};
 use tree_sitter::Node;
 
 pub struct GoVisitor<'a> {
@@ -9,6 +11,8 @@ pub struct GoVisitor<'a> {
     pub structs: Vec<ClassEntity>,
     pub interfaces: Vec<TraitEntity>,
     pub imports: Vec<ImportRelation>,
+    pub calls: Vec<CallRelation>,
+    current_function: Option<String>,
 }
 
 impl<'a> GoVisitor<'a> {
@@ -19,6 +23,8 @@ impl<'a> GoVisitor<'a> {
             structs: Vec::new(),
             interfaces: Vec::new(),
             imports: Vec::new(),
+            calls: Vec::new(),
+            current_function: None,
         }
     }
 
@@ -28,10 +34,19 @@ impl<'a> GoVisitor<'a> {
 
     pub fn visit_node(&mut self, node: Node) {
         match node.kind() {
-            "function_declaration" => self.visit_function(node),
-            "method_declaration" => self.visit_method(node),
+            "function_declaration" => {
+                self.visit_function(node);
+                // Don't recurse — visit_function handles body for call extraction
+                return;
+            }
+            "method_declaration" => {
+                self.visit_method(node);
+                // Don't recurse — visit_method handles body for call extraction
+                return;
+            }
             "type_declaration" => self.visit_type_declaration(node),
             "import_declaration" => self.visit_import(node),
+            "call_expression" => self.visit_call_expression(node),
             _ => {}
         }
 
@@ -47,6 +62,9 @@ impl<'a> GoVisitor<'a> {
             .map(|n| self.node_text(n))
             .unwrap_or_else(|| "anonymous".to_string());
 
+        let previous_function = self.current_function.clone();
+        self.current_function = Some(name.clone());
+
         let func = FunctionEntity {
             name,
             signature: self
@@ -71,6 +89,12 @@ impl<'a> GoVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        if let Some(body) = node.child_by_field_name("body") {
+            self.visit_body_for_calls(body);
+        }
+
+        self.current_function = previous_function;
     }
 
     fn visit_method(&mut self, node: Node) {
@@ -79,6 +103,9 @@ impl<'a> GoVisitor<'a> {
             .map(|n| self.node_text(n))
             .unwrap_or_else(|| "method".to_string());
 
+        let previous_function = self.current_function.clone();
+        self.current_function = Some(name.clone());
+
         let func = FunctionEntity {
             name,
             signature: self
@@ -103,6 +130,62 @@ impl<'a> GoVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        if let Some(body) = node.child_by_field_name("body") {
+            self.visit_body_for_calls(body);
+        }
+
+        self.current_function = previous_function;
+    }
+
+    /// Visit a call expression and record the caller→callee relationship
+    fn visit_call_expression(&mut self, node: Node) {
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        let callee = self.extract_callee_name(node);
+        if callee.is_empty() {
+            return;
+        }
+
+        self.calls.push(CallRelation::new(
+            caller,
+            callee,
+            node.start_position().row + 1,
+        ));
+    }
+
+    /// Extract the callee function name from a call expression node
+    fn extract_callee_name(&self, node: Node) -> String {
+        if let Some(func_node) = node.child_by_field_name("function") {
+            match func_node.kind() {
+                "identifier" => self.node_text(func_node),
+                "selector_expression" => {
+                    // e.g., fmt.Println, obj.Method
+                    if let Some(field) = func_node.child_by_field_name("field") {
+                        self.node_text(field)
+                    } else {
+                        self.node_text(func_node)
+                    }
+                }
+                _ => self.node_text(func_node),
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    /// Recursively visit a node's children looking for call expressions
+    fn visit_body_for_calls(&mut self, node: Node) {
+        if node.kind() == "call_expression" {
+            self.visit_call_expression(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_body_for_calls(child);
+        }
     }
 
     fn visit_type_declaration(&mut self, node: Node) {
@@ -467,5 +550,56 @@ mod tests {
         assert_eq!(visitor.imports[2].imported, "encoding/json");
         assert_eq!(visitor.imports[2].alias, None);
         assert!(!visitor.imports[2].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_call_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc caller() {\n\tcallee()\n\tfmt.Println(\"hello\")\n}\nfunc callee() {}";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.calls.len(), 2, "Should extract 2 calls");
+        assert_eq!(visitor.calls[0].caller, "caller");
+        assert_eq!(visitor.calls[0].callee, "callee");
+        assert_eq!(visitor.calls[1].caller, "caller");
+        assert_eq!(visitor.calls[1].callee, "Println");
+    }
+
+    #[test]
+    fn test_visitor_method_call_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\ntype Foo struct{}\nfunc (f Foo) Method() {\n\thelper()\n}\nfunc helper() {}";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.calls.len(), 1);
+        assert_eq!(visitor.calls[0].caller, "Method");
+        assert_eq!(visitor.calls[0].callee, "helper");
+    }
+
+    #[test]
+    fn test_visitor_no_calls_outside_function() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc standalone() {}";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.calls.len(), 0);
     }
 }

@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-c"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-cpp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-csharp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-go"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-java"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-kotlin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-php"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-python"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-ruby"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-swift"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-tcl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cc",
  "codegraph",
@@ -406,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-typescript"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",

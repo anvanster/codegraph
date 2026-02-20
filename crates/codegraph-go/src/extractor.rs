@@ -55,6 +55,7 @@ pub fn extract(
     ir.classes = visitor.structs;
     ir.traits = visitor.interfaces;
     ir.imports = visitor.imports;
+    ir.calls = visitor.calls;
 
     Ok(ir)
 }
