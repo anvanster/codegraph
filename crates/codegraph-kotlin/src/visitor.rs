@@ -2,14 +2,12 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, ParserConfig, TraitEntity,
+    InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
 pub struct KotlinVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
     pub traits: Vec<TraitEntity>,
@@ -23,10 +21,9 @@ pub struct KotlinVisitor<'a> {
 }
 
 impl<'a> KotlinVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             classes: Vec::new(),
             traits: Vec::new(),
@@ -976,57 +973,14 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = KotlinVisitor::new(source, ParserConfig::default());
+        let mut visitor = KotlinVisitor::new(source);
         visitor.visit_node(tree.root_node());
         visitor
     }
 
-    #[allow(dead_code)]
-    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize) {
-        let indent = "  ".repeat(depth);
-        let text: String = node
-            .utf8_text(source.as_bytes())
-            .unwrap_or("")
-            .chars()
-            .take(40)
-            .collect();
-        eprintln!("{}{}: {:?}", indent, node.kind(), text);
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            print_tree(child, source, depth + 1);
-        }
-    }
-
-    #[test]
-    fn test_debug_tree_structure() {
-        use tree_sitter::Parser;
-
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_kotlin::language())
-            .unwrap();
-
-        let sources = [
-            ("interface", "interface Reader { fun read(): String }"),
-            ("class_with_method", "class Calculator { fun add(a: Int, b: Int): Int = a + b }"),
-            ("enum_class", "enum class Status { PENDING, ACTIVE }"),
-            ("inheritance", "open class Animal\nclass Dog : Animal()"),
-            ("generic_class", "class Container<T>(val value: T)"),
-            ("visibility", "class Foo { private fun bar() {} protected fun baz() {} public fun qux() {} internal fun int_fn() {} }"),
-            ("method_calls", "class MyClass {\n    fun caller() {\n        helper()\n        process()\n    }\n    fun helper() {}\n    fun process() {}\n}"),
-        ];
-
-        for (name, source) in sources {
-            let tree = parser.parse(source.as_bytes(), None).unwrap();
-            eprintln!("\n=== {} ===", name);
-            print_tree(tree.root_node(), source, 0);
-        }
-    }
-
     #[test]
     fn test_visitor_basics() {
-        let visitor = KotlinVisitor::new(b"", ParserConfig::default());
+        let visitor = KotlinVisitor::new(b"");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
         assert_eq!(visitor.traits.len(), 0);

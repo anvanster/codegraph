@@ -10,7 +10,7 @@ use crate::visitor::TypeScriptVisitor;
 pub fn extract(
     source: &str,
     file_path: &Path,
-    config: &ParserConfig,
+    _config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
     // Create tree-sitter parser with appropriate language variant
     let mut parser = Parser::new();
@@ -70,7 +70,7 @@ pub fn extract(
     ir.module = Some(module);
 
     // Create visitor and walk the AST
-    let mut visitor = TypeScriptVisitor::new(source.as_bytes(), config.clone());
+    let mut visitor = TypeScriptVisitor::new(source.as_bytes());
     visitor.visit_node(root_node);
 
     // Transfer extracted entities to IR

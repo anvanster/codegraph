@@ -10,7 +10,7 @@ use crate::visitor::CppVisitor;
 pub fn extract(
     source: &str,
     file_path: &Path,
-    config: &ParserConfig,
+    _config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
     let mut parser = Parser::new();
     let language = tree_sitter_cpp::language();
@@ -49,7 +49,7 @@ pub fn extract(
         attributes: Vec::new(),
     });
 
-    let mut visitor = CppVisitor::new(source.as_bytes(), config.clone());
+    let mut visitor = CppVisitor::new(source.as_bytes());
     visitor.visit_node(root_node);
 
     ir.functions = visitor.functions;

@@ -2,16 +2,13 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
-    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, ParserConfig,
-    TraitEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
 /// Visitor that extracts entities and relationships from TypeScript/JavaScript AST
 pub struct TypeScriptVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
     pub interfaces: Vec<TraitEntity>,
@@ -24,10 +21,9 @@ pub struct TypeScriptVisitor<'a> {
 }
 
 impl<'a> TypeScriptVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             classes: Vec::new(),
             interfaces: Vec::new(),
@@ -655,7 +651,7 @@ mod tests {
 
     #[test]
     fn test_visitor_basics() {
-        let visitor = TypeScriptVisitor::new(b"test", ParserConfig::default());
+        let visitor = TypeScriptVisitor::new(b"test");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
     }
@@ -671,7 +667,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -692,7 +688,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -710,7 +706,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.classes.len(), 1);
@@ -730,7 +726,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.interfaces.len(), 1);
@@ -748,7 +744,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -765,7 +761,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -787,7 +783,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -807,7 +803,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -827,7 +823,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -846,7 +842,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -868,7 +864,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         // Arrow functions should be extracted
@@ -886,7 +882,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.classes.len(), 1);
@@ -911,7 +907,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.classes.len(), 1);
@@ -938,7 +934,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.classes.len(), 1);
@@ -962,7 +958,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.classes.len(), 1);
@@ -984,7 +980,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1009,7 +1005,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.classes.len(), 1);
@@ -1035,7 +1031,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1063,7 +1059,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1084,7 +1080,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1104,7 +1100,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1124,7 +1120,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1144,7 +1140,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1164,7 +1160,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1184,7 +1180,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1204,7 +1200,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -1225,7 +1221,7 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TypeScriptVisitor::new(source, ParserConfig::default());
+        let mut visitor = TypeScriptVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);

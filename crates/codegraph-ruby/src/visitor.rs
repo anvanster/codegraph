@@ -2,14 +2,12 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, ParserConfig, TraitEntity,
+    InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
 pub struct RubyVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
     pub traits: Vec<TraitEntity>,
@@ -23,10 +21,9 @@ pub struct RubyVisitor<'a> {
 }
 
 impl<'a> RubyVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             classes: Vec::new(),
             traits: Vec::new(),
@@ -554,51 +551,14 @@ mod tests {
         parser.set_language(&tree_sitter_ruby::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = RubyVisitor::new(source, ParserConfig::default());
+        let mut visitor = RubyVisitor::new(source);
         visitor.visit_node(tree.root_node());
         visitor
     }
 
-    #[allow(dead_code)]
-    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize) {
-        let indent = "  ".repeat(depth);
-        let text: String = node
-            .utf8_text(source.as_bytes())
-            .unwrap_or("")
-            .chars()
-            .take(40)
-            .collect();
-        eprintln!("{}{}: {:?}", indent, node.kind(), text);
-
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            print_tree(child, source, depth + 1);
-        }
-    }
-
-    #[test]
-    fn test_debug_tree_structure() {
-        use tree_sitter::Parser;
-
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_ruby::language()).unwrap();
-
-        let sources = [
-            ("inheritance", "class Animal\nend\nclass Dog < Animal\nend"),
-            ("method_calls", "class MyClass\n  def caller\n    helper\n    process\n  end\n  def helper\n  end\n  def process\n  end\nend"),
-            ("singleton_method", "class Helper\n  def self.format(str)\n    str.strip\n  end\nend"),
-        ];
-
-        for (name, source) in sources {
-            let tree = parser.parse(source.as_bytes(), None).unwrap();
-            eprintln!("\n=== {} ===", name);
-            print_tree(tree.root_node(), source, 0);
-        }
-    }
-
     #[test]
     fn test_visitor_basics() {
-        let visitor = RubyVisitor::new(b"", ParserConfig::default());
+        let visitor = RubyVisitor::new(b"");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
         assert_eq!(visitor.traits.len(), 0);

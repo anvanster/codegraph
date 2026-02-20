@@ -18,7 +18,7 @@ pub struct TclExtraData {
 pub fn extract(
     source: &str,
     file_path: &Path,
-    config: &ParserConfig,
+    _config: &ParserConfig,
 ) -> Result<(CodeIR, TclExtraData), ParserError> {
     let mut parser = Parser::new();
     let language = crate::ts_tcl::language();
@@ -52,7 +52,7 @@ pub fn extract(
         attributes: Vec::new(),
     });
 
-    let mut visitor = TclVisitor::new(source.as_bytes(), config.clone());
+    let mut visitor = TclVisitor::new(source.as_bytes());
     visitor.visit_node(root_node);
 
     ir.functions = visitor.functions;

@@ -2,14 +2,12 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, ParserConfig, TraitEntity,
+    InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
 pub struct CSharpVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
     pub traits: Vec<TraitEntity>,
@@ -23,10 +21,9 @@ pub struct CSharpVisitor<'a> {
 }
 
 impl<'a> CSharpVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             classes: Vec::new(),
             traits: Vec::new(),
@@ -879,14 +876,14 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = CSharpVisitor::new(source, ParserConfig::default());
+        let mut visitor = CSharpVisitor::new(source);
         visitor.visit_node(tree.root_node());
         visitor
     }
 
     #[test]
     fn test_visitor_basics() {
-        let visitor = CSharpVisitor::new(b"", ParserConfig::default());
+        let visitor = CSharpVisitor::new(b"");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
         assert_eq!(visitor.traits.len(), 0);

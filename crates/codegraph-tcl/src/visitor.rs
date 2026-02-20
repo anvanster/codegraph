@@ -7,7 +7,6 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityMetrics, FunctionEntity, ImportRelation, Parameter,
-    ParserConfig,
 };
 use tree_sitter::Node;
 
@@ -106,8 +105,6 @@ fn resolve_kind(node: Node<'_>) -> &str {
 
 pub struct TclVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
 
     // Standard CodeIR entities
     pub functions: Vec<FunctionEntity>,
@@ -125,10 +122,9 @@ pub struct TclVisitor<'a> {
 }
 
 impl<'a> TclVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             classes: Vec::new(),
             imports: Vec::new(),
@@ -1653,14 +1649,14 @@ mod tests {
         parser.set_language(&language).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = TclVisitor::new(source, ParserConfig::default());
+        let mut visitor = TclVisitor::new(source);
         visitor.visit_node(tree.root_node());
         visitor
     }
 
     #[test]
     fn test_visitor_empty() {
-        let visitor = TclVisitor::new(b"", ParserConfig::default());
+        let visitor = TclVisitor::new(b"");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
     }
@@ -1877,31 +1873,6 @@ mod tests {
     // cascading parse issues when multiple grammar keywords appear in
     // deeply nested structures. These tests exercise each capability
     // in isolation or small combinations that the parser handles well.
-
-    #[allow(dead_code)]
-    fn dump_ast(source: &[u8]) {
-        let mut parser = Parser::new();
-        let language = crate::ts_tcl::language();
-        parser.set_language(&language).unwrap();
-        let tree = parser.parse(source, None).unwrap();
-
-        fn dump(node: tree_sitter::Node, source: &[u8], indent: usize) {
-            let text = node.utf8_text(source).unwrap_or("");
-            let short = if text.len() > 80 { &text[..80] } else { text };
-            eprintln!(
-                "{}{} [{}] = {:?}",
-                " ".repeat(indent),
-                node.kind(),
-                node.child_count(),
-                short
-            );
-            let mut c = node.walk();
-            for child in node.children(&mut c) {
-                dump(child, source, indent + 2);
-            }
-        }
-        dump(tree.root_node(), source, 0);
-    }
 
     #[test]
     fn test_imports_and_packages() {

@@ -8,7 +8,7 @@
 
 use codegraph_parser_api::{
     ClassEntity, ComplexityBuilder, ComplexityMetrics, Field, FunctionEntity, ImportRelation,
-    Parameter, ParserConfig,
+    Parameter,
 };
 use tree_sitter::Node;
 
@@ -25,8 +25,6 @@ pub struct FunctionCall {
 
 pub struct CVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub structs: Vec<ClassEntity>,
     pub imports: Vec<ImportRelation>,
@@ -39,10 +37,9 @@ pub struct CVisitor<'a> {
 }
 
 impl<'a> CVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             structs: Vec::new(),
             imports: Vec::new(),
@@ -701,14 +698,14 @@ mod tests {
         parser.set_language(&tree_sitter_c::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = CVisitor::new(source, ParserConfig::default());
+        let mut visitor = CVisitor::new(source);
         visitor.visit_node(tree.root_node());
         visitor
     }
 
     #[test]
     fn test_visitor_basics() {
-        let visitor = CVisitor::new(b"int main() {}", ParserConfig::default());
+        let visitor = CVisitor::new(b"int main() {}");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.structs.len(), 0);
         assert_eq!(visitor.imports.len(), 0);

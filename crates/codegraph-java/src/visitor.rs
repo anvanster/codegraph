@@ -2,14 +2,12 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, ParserConfig, TraitEntity,
+    InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
 pub struct JavaVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub classes: Vec<ClassEntity>,
     pub traits: Vec<TraitEntity>,
@@ -23,10 +21,9 @@ pub struct JavaVisitor<'a> {
 }
 
 impl<'a> JavaVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             classes: Vec::new(),
             traits: Vec::new(),
@@ -789,14 +786,14 @@ mod tests {
         parser.set_language(&tree_sitter_java::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = JavaVisitor::new(source, ParserConfig::default());
+        let mut visitor = JavaVisitor::new(source);
         visitor.visit_node(tree.root_node());
         visitor
     }
 
     #[test]
     fn test_visitor_basics() {
-        let visitor = JavaVisitor::new(b"", ParserConfig::default());
+        let visitor = JavaVisitor::new(b"");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.classes.len(), 0);
         assert_eq!(visitor.traits.len(), 0);

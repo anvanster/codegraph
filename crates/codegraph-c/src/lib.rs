@@ -37,8 +37,7 @@
 //! For code with syntax errors or missing headers (like kernel code):
 //!
 //! ```rust,no_run
-//! use codegraph_c::{extractor::{extract_with_options, ExtractionOptions}, CParser};
-//! use codegraph_parser_api::ParserConfig;
+//! use codegraph_c::extractor::{extract_with_options, ExtractionOptions};
 //! use std::path::Path;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,7 +47,7 @@
 //!
 //! // Use kernel-optimized extraction
 //! let options = ExtractionOptions::for_kernel_code();
-//! let result = extract_with_options(source, Path::new("test.c"), &ParserConfig::default(), &options)?;
+//! let result = extract_with_options(source, Path::new("test.c"), &options)?;
 //!
 //! println!("Extracted {} functions (partial: {})", result.ir.functions.len(), result.is_partial);
 //! # Ok(())

@@ -8,12 +8,6 @@ _(none — all items completed)_
 
 ## Medium Priority
 
-### 4. Consistent error handling for syntax errors across all parsers
-- Convention: parsers return `Err` for unparseable files (tree-sitter `has_error()` check in extractor)
-- **Have `has_error()` check**: C, Go, Python, Rust, TypeScript (5 of 13)
-- **Missing `has_error()` check**: cpp, csharp, java, kotlin, php, ruby, swift, tcl (8 parsers)
-- codegraph-tcl may need special handling due to vendored grammar quirks
-
 ### 5. Dead `#[allow(dead_code)]` across visitor modules
 - Originally noted for codegraph-python `VisitorContext` — still only used in tests, not in extractor
 - Pattern is widespread: `#[allow(dead_code)]` found in 11 of 13 parser visitor modules
@@ -69,8 +63,15 @@ _(none — all items completed)_
 - Extractor now assigns decorators to `func.attributes`
 - Test assertions completed for both async detection and decorator extraction
 
+### ~~4. Consistent error handling for syntax errors across all parsers~~
+- Added `has_error()` check to cpp, csharp, java, kotlin, php, ruby, swift extractors (`f34b749`)
+- TCL intentionally excluded — vendored grammar produces ERROR nodes for keywords, resolved by sibling-stitching
+- Removed misleading "tolerant parsing" comment from PHP extractor
+- 12 of 13 parsers now enforce strict syntax error checking; TCL documented as exception
+- Added `test_syntax_error` integration tests to all 7 parsers
+
 ## Workspace Health
 
-- **Total tests**: 1012 passing, 0 failing
+- **Total tests**: 1019 passing, 0 failing
 - **Crates**: 15 (core + parser-api + 13 language parsers)
 - **Clippy**: clean

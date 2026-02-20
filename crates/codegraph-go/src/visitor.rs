@@ -1,14 +1,10 @@
 //! AST visitor for extracting Go entities
 
-use codegraph_parser_api::{
-    ClassEntity, FunctionEntity, ImportRelation, ParserConfig, TraitEntity,
-};
+use codegraph_parser_api::{ClassEntity, FunctionEntity, ImportRelation, TraitEntity};
 use tree_sitter::Node;
 
 pub struct GoVisitor<'a> {
     pub source: &'a [u8],
-    #[allow(dead_code)]
-    pub config: ParserConfig,
     pub functions: Vec<FunctionEntity>,
     pub structs: Vec<ClassEntity>,
     pub interfaces: Vec<TraitEntity>,
@@ -16,10 +12,9 @@ pub struct GoVisitor<'a> {
 }
 
 impl<'a> GoVisitor<'a> {
-    pub fn new(source: &'a [u8], config: ParserConfig) -> Self {
+    pub fn new(source: &'a [u8]) -> Self {
         Self {
             source,
-            config,
             functions: Vec::new(),
             structs: Vec::new(),
             interfaces: Vec::new(),
@@ -263,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_visitor_basics() {
-        let visitor = GoVisitor::new(b"package main", ParserConfig::default());
+        let visitor = GoVisitor::new(b"package main");
         assert_eq!(visitor.functions.len(), 0);
         assert_eq!(visitor.structs.len(), 0);
         assert_eq!(visitor.interfaces.len(), 0);
@@ -278,7 +273,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.functions.len(), 1);
@@ -294,7 +289,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.structs.len(), 1);
@@ -310,7 +305,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.interfaces.len(), 1);
@@ -326,7 +321,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         // Methods are extracted as functions
@@ -343,7 +338,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -358,7 +353,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.structs.len(), 2);
@@ -376,7 +371,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         // Should extract 3 individual imports, not 1 block
@@ -399,7 +394,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -417,7 +412,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -435,7 +430,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 1);
@@ -453,7 +448,7 @@ mod tests {
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
-        let mut visitor = GoVisitor::new(source, ParserConfig::default());
+        let mut visitor = GoVisitor::new(source);
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.imports.len(), 3);

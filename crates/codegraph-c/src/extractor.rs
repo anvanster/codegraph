@@ -58,9 +58,9 @@ pub struct ExtractionResult {
 pub fn extract(
     source: &str,
     file_path: &Path,
-    config: &ParserConfig,
+    _config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
-    let result = extract_with_options(source, file_path, config, &ExtractionOptions::default())?;
+    let result = extract_with_options(source, file_path, &ExtractionOptions::default())?;
 
     if result.is_partial {
         return Err(ParserError::SyntaxError(
@@ -78,7 +78,6 @@ pub fn extract(
 pub fn extract_with_options(
     source: &str,
     file_path: &Path,
-    config: &ParserConfig,
     options: &ExtractionOptions,
 ) -> Result<ExtractionResult, ParserError> {
     // Detect macros from original source (before preprocessing)
@@ -141,7 +140,7 @@ pub fn extract_with_options(
     });
 
     // Visit the AST - the visitor will skip ERROR nodes gracefully
-    let mut visitor = CVisitor::new(processed_source.as_bytes(), config.clone());
+    let mut visitor = CVisitor::new(processed_source.as_bytes());
     visitor.set_extract_calls(options.extract_calls);
     visitor.visit_node(root_node);
 
@@ -335,9 +334,8 @@ int valid_func() { return 0; }
 int broken( {
 int another_valid() { return 1; }
 "#;
-        let config = ParserConfig::default();
         let options = ExtractionOptions::tolerant();
-        let result = extract_with_options(source, Path::new("test.c"), &config, &options);
+        let result = extract_with_options(source, Path::new("test.c"), &options);
 
         assert!(result.is_ok());
         let extraction = result.unwrap();
@@ -359,9 +357,8 @@ static __exit void my_module_exit(void) {
 
 MODULE_LICENSE("GPL");
 "#;
-        let config = ParserConfig::default();
         let options = ExtractionOptions::for_kernel_code();
-        let result = extract_with_options(source, Path::new("test.c"), &config, &options);
+        let result = extract_with_options(source, Path::new("test.c"), &options);
 
         // With preprocessing, this should parse better
         assert!(result.is_ok());
