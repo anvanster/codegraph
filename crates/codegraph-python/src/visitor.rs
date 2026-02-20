@@ -6,6 +6,7 @@
 use tree_sitter::Node;
 
 /// Context for tracking the current scope during AST traversal
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct VisitorContext {
     /// Current class name (if we're inside a class)
@@ -18,6 +19,7 @@ pub struct VisitorContext {
     pub depth: usize,
 }
 
+#[allow(dead_code)]
 impl VisitorContext {
     /// Create a new empty context
     pub fn new() -> Self {
@@ -107,11 +109,13 @@ pub fn extract_decorators(source: &[u8], node: Node) -> Vec<String> {
 }
 
 /// Extract type annotation as string
+#[allow(dead_code)]
 pub fn type_to_string(source: &[u8], node: Node) -> String {
     node.utf8_text(source).unwrap_or("Any").to_string()
 }
 
 /// Extract parameter default value as string
+#[allow(dead_code)]
 pub fn default_to_string(source: &[u8], node: Node) -> String {
     node.utf8_text(source).unwrap_or("...").to_string()
 }

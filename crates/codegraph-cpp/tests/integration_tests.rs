@@ -278,18 +278,23 @@ void test() {}
     for id in &module_ids {
         let node = graph.get_node(*id).unwrap();
         let name = node.properties.get_string("name").unwrap();
-        let is_system = node
-            .properties
-            .get_string("is_system")
-            .map_or(false, |v| v == "true");
+        let is_system = node.properties.get_string("is_system") == Some("true");
 
         match name {
             "iostream" | "vector" => {
-                assert!(is_system, "System include '{}' should have is_system=true", name);
+                assert!(
+                    is_system,
+                    "System include '{}' should have is_system=true",
+                    name
+                );
                 system_count += 1;
             }
             "myheader.h" | "utils/helpers.h" => {
-                assert!(!is_system, "Local include '{}' should not have is_system", name);
+                assert!(
+                    !is_system,
+                    "Local include '{}' should not have is_system",
+                    name
+                );
                 local_count += 1;
             }
             _ => panic!("Unexpected module: {}", name),

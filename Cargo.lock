@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-cpp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-ruby"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",
@@ -406,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "codegraph-typescript"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "codegraph",
  "codegraph-parser-api",

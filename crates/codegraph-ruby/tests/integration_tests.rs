@@ -246,10 +246,7 @@ require_relative '../lib/utils'
     for id in &module_ids {
         let node = graph.get_node(*id).unwrap();
         let name = node.properties.get_string("name").unwrap();
-        let is_external = node
-            .properties
-            .get_string("is_external")
-            .map_or(false, |v| v == "true");
+        let is_external = node.properties.get_string("is_external") == Some("true");
 
         match name {
             "json" | "net/http" => {

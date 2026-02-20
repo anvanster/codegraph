@@ -565,10 +565,15 @@ function hello(): void {
     let result = parser.parse_source(source, Path::new("test.ts"), &mut graph);
     assert!(result.is_ok());
 
-    let info = result.unwrap();
+    let _info = result.unwrap();
     // 2 reference directives + 1 import statement = 3 Module nodes
     let module_ids = graph.query().node_type(NodeType::Module).execute().unwrap();
-    assert_eq!(module_ids.len(), 3, "Expected 3 modules, found {}", module_ids.len());
+    assert_eq!(
+        module_ids.len(),
+        3,
+        "Expected 3 modules, found {}",
+        module_ids.len()
+    );
 
     // Check that the reference paths are present
     let mut ref_paths: Vec<String> = Vec::new();
@@ -599,5 +604,9 @@ function hello(): void {}
 
     // types= references should NOT be captured, and regular comments should be ignored
     let module_ids = graph.query().node_type(NodeType::Module).execute().unwrap();
-    assert_eq!(module_ids.len(), 0, "Expected 0 modules from types refs and comments");
+    assert_eq!(
+        module_ids.len(),
+        0,
+        "Expected 0 modules from types refs and comments"
+    );
 }

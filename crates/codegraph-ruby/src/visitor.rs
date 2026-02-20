@@ -664,7 +664,10 @@ mod tests {
         // require → alias is None (external gem)
         assert_eq!(visitor.imports[0].alias, None);
         // require_relative → alias marks it as relative
-        assert_eq!(visitor.imports[1].alias, Some("require_relative".to_string()));
+        assert_eq!(
+            visitor.imports[1].alias,
+            Some("require_relative".to_string())
+        );
     }
 
     #[test]

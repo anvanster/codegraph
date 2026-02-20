@@ -1,5 +1,4 @@
 use codegraph::{CodeGraph, Direction, NodeType};
-use std::collections::HashMap;
 use std::env;
 
 fn main() {

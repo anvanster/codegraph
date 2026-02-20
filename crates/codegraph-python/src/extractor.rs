@@ -366,6 +366,7 @@ fn extract_parameters(source: &[u8], node: Node) -> Vec<Parameter> {
 }
 
 /// Extract a class entity with its methods
+#[allow(clippy::type_complexity)]
 fn extract_class(
     source: &[u8],
     node: Node,
@@ -480,7 +481,7 @@ fn extract_calls_recursive(
     source: &[u8],
     node: Node,
     caller_name: &str,
-    line_offset: usize,
+    _line_offset: usize,
     calls: &mut Vec<CallRelation>,
 ) {
     if node.kind() == "call" {
@@ -496,7 +497,7 @@ fn extract_calls_recursive(
     // Recurse into children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_calls_recursive(source, child, caller_name, line_offset, calls);
+        extract_calls_recursive(source, child, caller_name, _line_offset, calls);
     }
 }
 
@@ -761,14 +762,14 @@ fn calculate_complexity_recursive(source: &[u8], node: Node, builder: &mut Compl
     }
 }
 
-fn count_logical_operators(source: &[u8], node: Node, builder: &mut ComplexityBuilder) {
+fn count_logical_operators(_source: &[u8], node: Node, builder: &mut ComplexityBuilder) {
     if node.kind() == "boolean_operator" {
         builder.add_logical_operator();
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        count_logical_operators(source, child, builder);
+        count_logical_operators(_source, child, builder);
     }
 }
 

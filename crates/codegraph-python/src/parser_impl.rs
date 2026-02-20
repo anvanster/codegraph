@@ -579,7 +579,9 @@ mod tests {
         let mut ir = CodeIR::new(PathBuf::from("test.py"));
         ir.set_module(ModuleEntity::new("test", "test.py", "python"));
         // from ..models import Bar
-        ir.add_import(ImportRelation::new("test", "..models").with_symbols(vec!["Bar".to_string()]));
+        ir.add_import(
+            ImportRelation::new("test", "..models").with_symbols(vec!["Bar".to_string()]),
+        );
 
         let mut graph = CodeGraph::in_memory().unwrap();
         let file_info = parser

@@ -157,10 +157,11 @@ impl<'a> RustVisitor<'a> {
                 }
             } else if child.kind() == "line_comment" {
                 let text = self.node_text(child);
-                if text.starts_with("///") {
-                    docs.push(text[3..].trim().to_string());
-                } else if text.starts_with("//!") {
-                    docs.push(text[3..].trim().to_string());
+                if let Some(rest) = text
+                    .strip_prefix("///")
+                    .or_else(|| text.strip_prefix("//!"))
+                {
+                    docs.push(rest.trim().to_string());
                 }
             }
         }
@@ -589,7 +590,7 @@ mod tests {
     use super::*;
     use tree_sitter::Parser;
 
-    fn parse_and_visit(source: &str) -> RustVisitor {
+    fn parse_and_visit(source: &str) -> RustVisitor<'_> {
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_rust::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
@@ -805,7 +806,10 @@ use crate::graph::scanner::FileScanner;
         assert_eq!(visitor.imports[0].imported, "scanner");
         // use statement
         assert_eq!(visitor.imports[1].importer, "current_module");
-        assert_eq!(visitor.imports[1].imported, "crate::graph::scanner::FileScanner");
+        assert_eq!(
+            visitor.imports[1].imported,
+            "crate::graph::scanner::FileScanner"
+        );
     }
 
     #[test]

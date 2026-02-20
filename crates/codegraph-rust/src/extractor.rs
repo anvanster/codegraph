@@ -104,8 +104,8 @@ fn extract_file_doc(source: &str, tree: &tree_sitter::Tree) -> Option<String> {
     for child in root.children(&mut cursor) {
         if child.kind() == "line_comment" {
             let text = child.utf8_text(source.as_bytes()).unwrap_or("");
-            if text.starts_with("//!") {
-                docs.push(text[3..].trim().to_string());
+            if let Some(rest) = text.strip_prefix("//!") {
+                docs.push(rest.trim().to_string());
             }
         } else if child.kind() != "attribute_item" {
             // Stop looking once we hit non-doc content

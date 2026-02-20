@@ -82,8 +82,10 @@ impl<'a> PhpVisitor<'a> {
                 self.visit_use(node);
                 false
             }
-            "include_expression" | "include_once_expression"
-            | "require_expression" | "require_once_expression" => {
+            "include_expression"
+            | "include_once_expression"
+            | "require_expression"
+            | "require_once_expression" => {
                 self.visit_include_require(node);
                 false
             }
@@ -488,7 +490,12 @@ impl<'a> PhpVisitor<'a> {
         let mut string_parts: Vec<String> = Vec::new();
         let mut has_dir_marker = false;
         let mut has_dynamic_parts = false;
-        self.collect_concat_parts(concat_node, &mut string_parts, &mut has_dir_marker, &mut has_dynamic_parts);
+        self.collect_concat_parts(
+            concat_node,
+            &mut string_parts,
+            &mut has_dir_marker,
+            &mut has_dynamic_parts,
+        );
 
         if string_parts.is_empty() {
             return;
@@ -524,7 +531,12 @@ impl<'a> PhpVisitor<'a> {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     if child.kind() != "." {
-                        self.collect_concat_parts(child, string_parts, has_dir_marker, has_dynamic_parts);
+                        self.collect_concat_parts(
+                            child,
+                            string_parts,
+                            has_dir_marker,
+                            has_dynamic_parts,
+                        );
                     }
                 }
             }
@@ -556,7 +568,12 @@ impl<'a> PhpVisitor<'a> {
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     if child.kind() != "(" && child.kind() != ")" {
-                        self.collect_concat_parts(child, string_parts, has_dir_marker, has_dynamic_parts);
+                        self.collect_concat_parts(
+                            child,
+                            string_parts,
+                            has_dir_marker,
+                            has_dynamic_parts,
+                        );
                     }
                 }
             }
@@ -1237,16 +1254,28 @@ require_once 'auth.php';
         assert_eq!(visitor.imports.len(), 4);
         assert_eq!(visitor.imports[0].imported, "helpers.php");
         assert_eq!(visitor.imports[0].importer, "include_require");
-        assert_eq!(visitor.imports[0].alias, Some("include_expression".to_string()));
+        assert_eq!(
+            visitor.imports[0].alias,
+            Some("include_expression".to_string())
+        );
 
         assert_eq!(visitor.imports[1].imported, "config.php");
-        assert_eq!(visitor.imports[1].alias, Some("require_expression".to_string()));
+        assert_eq!(
+            visitor.imports[1].alias,
+            Some("require_expression".to_string())
+        );
 
         assert_eq!(visitor.imports[2].imported, "db.php");
-        assert_eq!(visitor.imports[2].alias, Some("include_once_expression".to_string()));
+        assert_eq!(
+            visitor.imports[2].alias,
+            Some("include_once_expression".to_string())
+        );
 
         assert_eq!(visitor.imports[3].imported, "auth.php");
-        assert_eq!(visitor.imports[3].alias, Some("require_once_expression".to_string()));
+        assert_eq!(
+            visitor.imports[3].alias,
+            Some("require_once_expression".to_string())
+        );
     }
 
     #[test]
