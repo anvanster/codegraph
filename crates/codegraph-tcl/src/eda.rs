@@ -202,8 +202,23 @@ pub fn is_eda_command(name: &str) -> bool {
 
 /// Classify an EDA command and extract structured data from its arguments
 pub fn classify_eda_command(name: &str, node: Node, source: &[u8]) -> Option<EdaCommand> {
+    let args = collect_positional_args(node, source, true);
+    classify_eda_from_args(name, args)
+}
+
+/// Classify an EDA command from a split ERROR+command pair.
+/// Does not skip the first child since the command name was in the ERROR node.
+pub fn classify_eda_command_from_split(
+    name: &str,
+    node: Node,
+    source: &[u8],
+) -> Option<EdaCommand> {
+    let args = collect_positional_args(node, source, false);
+    classify_eda_from_args(name, args)
+}
+
+fn classify_eda_from_args(name: &str, args: Vec<String>) -> Option<EdaCommand> {
     let base = base_name(name);
-    let args = collect_positional_args(node, source);
 
     if let Some(&file_type) = DESIGN_READ_COMMANDS.get(base) {
         let path = find_file_argument(&args);
@@ -271,10 +286,10 @@ pub fn classify_eda_command(name: &str, node: Node, source: &[u8]) -> Option<Eda
 }
 
 /// Extract positional arguments from a command node (skip flags starting with -)
-fn collect_positional_args(node: Node, source: &[u8]) -> Vec<String> {
+fn collect_positional_args(node: Node, source: &[u8], skip_first: bool) -> Vec<String> {
     let mut args = Vec::new();
     let mut cursor = node.walk();
-    let mut skipped_name = false;
+    let mut skipped_name = !skip_first;
     let mut skip_next = false;
 
     for child in node.children(&mut cursor) {

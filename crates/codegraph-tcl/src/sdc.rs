@@ -81,9 +81,20 @@ pub fn is_sdc_command(name: &str) -> bool {
 /// Collect argument texts from a command node's children.
 /// Skips the command name (first word) and returns remaining words as strings.
 pub fn collect_args(node: Node, source: &[u8]) -> Vec<String> {
+    collect_args_inner(node, source, true)
+}
+
+/// Collect all args from a command node without skipping the first child.
+/// Used when the command name was already extracted from a sibling ERROR node
+/// (the grammar's position-0 split pattern).
+pub fn collect_args_from_split(node: Node, source: &[u8]) -> Vec<String> {
+    collect_args_inner(node, source, false)
+}
+
+fn collect_args_inner(node: Node, source: &[u8], skip_first: bool) -> Vec<String> {
     let mut args = Vec::new();
     let mut cursor = node.walk();
-    let mut skipped_name = false;
+    let mut skipped_name = !skip_first;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -128,17 +139,33 @@ pub fn collect_args(node: Node, source: &[u8]) -> Vec<String> {
 /// Parse an SDC command node into a structured constraint
 pub fn extract_sdc_constraint(cmd_name: &str, node: Node, source: &[u8]) -> Option<SdcConstraint> {
     let args = collect_args(node, source);
+    extract_sdc_from_args(cmd_name, &args)
+}
+
+/// Parse an SDC constraint from a split ERROR+command pair.
+/// Does not skip the first child of the command node since the command name
+/// was already extracted from the sibling ERROR node.
+pub fn extract_sdc_constraint_from_split(
+    cmd_name: &str,
+    node: Node,
+    source: &[u8],
+) -> Option<SdcConstraint> {
+    let args = collect_args_from_split(node, source);
+    extract_sdc_from_args(cmd_name, &args)
+}
+
+pub fn extract_sdc_from_args(cmd_name: &str, args: &[String]) -> Option<SdcConstraint> {
     match cmd_name {
-        "create_clock" | "create_generated_clock" => extract_create_clock(&args),
-        "set_input_delay" => extract_io_delay("input", &args),
-        "set_output_delay" => extract_io_delay("output", &args),
-        "set_false_path" => extract_timing_exception("false_path", &args),
-        "set_multicycle_path" => extract_timing_exception("multicycle_path", &args),
-        "set_max_delay" => extract_timing_exception("max_delay", &args),
-        "set_min_delay" => extract_timing_exception("min_delay", &args),
-        "set_clock_uncertainty" => extract_timing_exception("clock_uncertainty", &args),
-        "set_clock_latency" => extract_timing_exception("clock_latency", &args),
-        "set_clock_groups" => extract_timing_exception("clock_groups", &args),
+        "create_clock" | "create_generated_clock" => extract_create_clock(args),
+        "set_input_delay" => extract_io_delay("input", args),
+        "set_output_delay" => extract_io_delay("output", args),
+        "set_false_path" => extract_timing_exception("false_path", args),
+        "set_multicycle_path" => extract_timing_exception("multicycle_path", args),
+        "set_max_delay" => extract_timing_exception("max_delay", args),
+        "set_min_delay" => extract_timing_exception("min_delay", args),
+        "set_clock_uncertainty" => extract_timing_exception("clock_uncertainty", args),
+        "set_clock_latency" => extract_timing_exception("clock_latency", args),
+        "set_clock_groups" => extract_timing_exception("clock_groups", args),
         _ => None,
     }
 }

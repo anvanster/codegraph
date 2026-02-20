@@ -36,7 +36,8 @@ const TCL_KEYWORDS: &[&str] = &[
 /// Scan an ERROR node's children for a recognizable Tcl keyword.
 ///
 /// Returns `&'static str` (string literals from match arms) so there are
-/// no lifetime conflicts with `&mut self` in callers.
+/// no lifetime conflicts with `&mut self` in callers. Recurses into nested
+/// ERROR nodes to handle `ERROR(ERROR(proc))` patterns.
 fn resolve_error_keyword(node: Node) -> &'static str {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -55,10 +56,42 @@ fn resolve_error_keyword(node: Node) -> &'static str {
             "global" => return "global",
             "regexp" => return "regexp",
             "expr" => return "expr",
+            "ERROR" => {
+                let inner = resolve_error_keyword(child);
+                if inner != "unknown" {
+                    return inner;
+                }
+            }
             _ => continue,
         }
     }
     "unknown"
+}
+
+/// Like [`resolve_error_keyword`] but also checks `simple_word`/`word` children
+/// against the source text. This catches non-grammar keywords like `source`,
+/// `package`, and arbitrary commands (SDC/EDA) that the grammar wraps in ERROR.
+///
+/// Returns the text of the first `simple_word`/`word` child if no grammar keyword
+/// is found. This allows the sibling-stitching logic to handle ANY command that
+/// the grammar splits at position 0.
+fn resolve_error_keyword_with_source(node: Node, source: &[u8]) -> String {
+    let kw = resolve_error_keyword(node);
+    if kw != "unknown" {
+        return kw.to_string();
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "simple_word" || child.kind() == "word" {
+            if let Ok(text) = child.utf8_text(source) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+    }
+    "unknown".to_string()
 }
 
 /// Resolve a node's effective kind. ERROR nodes are mapped to their keyword;
@@ -145,11 +178,374 @@ impl<'a> TclVisitor<'a> {
         }
     }
 
+    /// Sibling-aware child visiting. Detects ERROR(keyword) + command(args)
+    /// pairs produced by the grammar's position-0 split bug and stitches them
+    /// back together before dispatch.
+    ///
+    /// Only stitches when the ERROR and command are on the same line — if they're
+    /// on different lines, they are independent commands (e.g. `compile\nreport_timing`).
     fn visit_children(&mut self, node: Node) {
         let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
+        let children: Vec<Node> = node.children(&mut cursor).collect();
+        let mut i = 0;
+        while i < children.len() {
+            let child = children[i];
+            if child.kind() == "ERROR" {
+                if let Some(&next) = children.get(i + 1) {
+                    if next.kind() == "command"
+                        && child.end_position().row == next.start_position().row
+                    {
+                        let kw = resolve_error_keyword_with_source(child, self.source);
+                        if kw != "unknown" {
+                            self.handle_stitched_pair(&kw, child, next);
+                            i += 2;
+                            continue;
+                        }
+                    }
+                }
+                // Standalone ERROR on its own line — check if it's a known command
+                let kw = resolve_error_keyword_with_source(child, self.source);
+                if kw != "unknown" && !TCL_KEYWORDS.contains(&kw.as_str()) {
+                    // Bare command like `compile` wrapped in ERROR at position 0
+                    self.record_call(&kw, child);
+                    i += 1;
+                    continue;
+                }
+            }
             self.visit_node(child);
+            i += 1;
         }
+    }
+
+    /// Dispatch a stitched ERROR(keyword) + command(args) pair.
+    fn handle_stitched_pair(&mut self, keyword: &str, error_node: Node, cmd_node: Node) {
+        match keyword {
+            "proc" => {
+                self.visit_proc_from_split(error_node, cmd_node);
+            }
+            "namespace" => {
+                self.visit_namespace_from_split(cmd_node);
+            }
+            "source" => {
+                let filename = self.extract_command_name(cmd_node);
+                let path = if filename.is_empty() {
+                    let args = self.collect_argument_nodes(cmd_node);
+                    args.first()
+                        .map(|a| self.node_text(*a).trim().to_string())
+                        .unwrap_or_default()
+                } else {
+                    filename
+                };
+                let cleaned = path.trim_matches('"').trim_matches('\'').to_string();
+                if !cleaned.is_empty() {
+                    self.imports.push(ImportRelation {
+                        importer: "file".to_string(),
+                        imported: cleaned,
+                        symbols: Vec::new(),
+                        is_wildcard: true,
+                        alias: None,
+                    });
+                }
+            }
+            "package" => {
+                let subcmd = self.extract_command_name(cmd_node);
+                if subcmd == "require" {
+                    let args = self.collect_argument_nodes(cmd_node);
+                    if let Some(pkg_node) = args.first() {
+                        let pkg_name = self.node_text(*pkg_node).trim().to_string();
+                        if !pkg_name.is_empty() {
+                            self.imports.push(ImportRelation {
+                                importer: "file".to_string(),
+                                imported: pkg_name,
+                                symbols: Vec::new(),
+                                is_wildcard: false,
+                                alias: None,
+                            });
+                        }
+                    }
+                }
+            }
+            other => {
+                self.visit_general_command_from_split(other, cmd_node);
+            }
+        }
+    }
+
+    /// Handle a general command from a stitched ERROR+command pair.
+    /// Uses split-aware arg collection (doesn't skip first child).
+    fn visit_general_command_from_split(&mut self, cmd_name: &str, node: Node) {
+        if sdc::is_sdc_command(cmd_name) {
+            if let Some(constraint) =
+                sdc::extract_sdc_constraint_from_split(cmd_name, node, self.source)
+            {
+                self.sdc_data.add(constraint);
+            }
+            self.record_call(cmd_name, node);
+            return;
+        }
+
+        if eda::is_eda_command(cmd_name) {
+            if let Some(eda_cmd) = eda::classify_eda_command_from_split(cmd_name, node, self.source)
+            {
+                match eda_cmd {
+                    EdaCommand::DesignFileRead { file_type, path } => {
+                        if !path.is_empty() {
+                            self.imports.push(ImportRelation {
+                                importer: "file".to_string(),
+                                imported: path.clone(),
+                                symbols: Vec::new(),
+                                is_wildcard: false,
+                                alias: None,
+                            });
+                        }
+                        self.eda_data.design_reads.push((file_type, path));
+                    }
+                    EdaCommand::DesignFileWrite { file_type, path } => {
+                        self.eda_data.design_writes.push((file_type, path));
+                    }
+                    EdaCommand::ToolFlowCommand { ref name, .. }
+                    | EdaCommand::ObjectQuery { ref name, .. } => {
+                        self.record_call(name, node);
+                    }
+                    EdaCommand::CommandRegistration { name, usage } => {
+                        self.eda_data.registered_commands.push((name, usage));
+                    }
+                    EdaCommand::CollectionIteration { .. } => {
+                        self.record_call(cmd_name, node);
+                        self.visit_braced_bodies(node);
+                    }
+                    EdaCommand::AttributeAccess { .. } => {
+                        self.record_call(cmd_name, node);
+                    }
+                }
+            }
+            return;
+        }
+
+        self.record_call(cmd_name, node);
+    }
+
+    /// Handle proc from a stitched ERROR(proc) + command(name args) pair.
+    /// Extracts name from cmd_node's name field, params/body from its arguments,
+    /// and doc comments from comment children inside the error_node.
+    ///
+    /// Handles two body shapes:
+    /// - Intact body: word_list has two braced_words (params, body)
+    /// - Fragmented body: body `{` becomes ERROR, content scatters as simple_words
+    fn visit_proc_from_split(&mut self, error_node: Node, cmd_node: Node) {
+        let name_str = self.extract_command_name(cmd_node);
+        if name_str.is_empty() {
+            return;
+        }
+
+        let args = self.collect_argument_nodes(cmd_node);
+
+        // Find params (first braced_word) and body (second braced_word, if present)
+        let mut params_node = None;
+        let mut body_node = None;
+        let mut body_scatter_start = None;
+        for (idx, arg) in args.iter().enumerate() {
+            if arg.kind() == "braced_word" || arg.kind() == "braced_word_simple" {
+                if params_node.is_none() {
+                    params_node = Some(*arg);
+                } else if body_node.is_none() {
+                    body_node = Some(*arg);
+                }
+            } else if params_node.is_some() && body_node.is_none() && body_scatter_start.is_none() {
+                // First non-braced_word after params — fragmented body starts here
+                body_scatter_start = Some(idx);
+            }
+        }
+
+        let qualified = self.qualified_name(&name_str);
+        let params = match params_node {
+            Some(pn) => self.extract_params_from_braced(pn),
+            None => Vec::new(),
+        };
+
+        // Extract doc comments from inside the error_node (comment children
+        // preceding the proc keyword get trapped there in the split case)
+        let doc_comment = {
+            let mut comments = Vec::new();
+            let mut c = error_node.walk();
+            for child in error_node.children(&mut c) {
+                if child.kind() == "comment" {
+                    comments.push(self.node_text(child));
+                }
+            }
+            if comments.is_empty() {
+                None
+            } else {
+                Some(comments.join("\n"))
+            }
+        };
+
+        // Calculate complexity: either from intact body or scattered keywords
+        let mut complexity = if let Some(bn) = body_node {
+            self.calculate_complexity(bn)
+        } else {
+            ComplexityMetrics {
+                cyclomatic_complexity: 1,
+                branches: 0,
+                loops: 0,
+                logical_operators: 0,
+                max_nesting_depth: 0,
+                exception_handlers: 0,
+                early_returns: 0,
+            }
+        };
+
+        // If body is fragmented, scan scattered content for complexity keywords
+        if body_node.is_none() {
+            if let Some(start) = body_scatter_start {
+                for arg in &args[start..] {
+                    let kind = resolve_kind(*arg);
+                    match kind {
+                        "if" | "elseif" => {
+                            complexity.cyclomatic_complexity += 1;
+                            complexity.branches += 1;
+                        }
+                        "while" | "foreach" | "for" => {
+                            complexity.cyclomatic_complexity += 1;
+                            complexity.loops += 1;
+                        }
+                        "catch" => {
+                            complexity.cyclomatic_complexity += 1;
+                            complexity.exception_handlers += 1;
+                        }
+                        _ => {
+                            // Check simple_word text for keyword names
+                            if arg.kind() == "simple_word" {
+                                let text = self.node_text(*arg);
+                                let trimmed = text.trim();
+                                match trimmed {
+                                    "if" | "elseif" => {
+                                        complexity.cyclomatic_complexity += 1;
+                                        complexity.branches += 1;
+                                    }
+                                    "while" | "foreach" | "for" => {
+                                        complexity.cyclomatic_complexity += 1;
+                                        complexity.loops += 1;
+                                    }
+                                    "catch" => {
+                                        complexity.cyclomatic_complexity += 1;
+                                        complexity.exception_handlers += 1;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let param_str = params
+            .iter()
+            .map(|p| {
+                if let Some(ref default) = p.default_value {
+                    format!("{{{} {}}}", p.name, default)
+                } else {
+                    p.name.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let signature = format!("proc {} {{{}}} {{...}}", name_str, param_str);
+
+        let mut func = FunctionEntity::new(
+            &qualified,
+            error_node.start_position().row + 1,
+            cmd_node.end_position().row + 1,
+        )
+        .with_visibility("public")
+        .with_signature(&signature);
+
+        func.parameters = params;
+        func.doc_comment = doc_comment;
+        func.parent_class = self.current_namespace();
+        func.complexity = Some(complexity);
+        self.functions.push(func);
+
+        // Visit body for nested calls
+        let prev_proc = self.current_procedure.take();
+        self.current_procedure = Some(qualified);
+        if let Some(bn) = body_node {
+            if bn.kind() == "arguments" {
+                self.visit_arguments_body(bn);
+            } else {
+                self.visit_braced_body(bn);
+            }
+        } else if let Some(start) = body_scatter_start {
+            // Body is fragmented — scan remaining args for keyword calls
+            for arg in &args[start..] {
+                let kind = resolve_kind(*arg);
+                match kind {
+                    "command" => self.visit_command(*arg),
+                    "if" | "elseif" | "while" | "foreach" | "try" | "catch" | "set" | "global"
+                    | "regexp" | "expr" | "else" | "finally" => {
+                        self.record_call(kind, *arg);
+                        self.visit_bodies(*arg);
+                    }
+                    _ => {
+                        if arg.kind() == "simple_word" {
+                            let text = self.node_text(*arg);
+                            let trimmed = text.trim();
+                            if TCL_KEYWORDS.contains(&trimmed) {
+                                self.record_call(trimmed, *arg);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.current_procedure = prev_proc;
+    }
+
+    /// Handle namespace from a stitched ERROR(namespace) + command(eval name {body}) pair.
+    fn visit_namespace_from_split(&mut self, cmd_node: Node) {
+        let subcmd = self.extract_command_name(cmd_node);
+        if subcmd != "eval" {
+            return;
+        }
+        let args = self.collect_argument_nodes(cmd_node);
+        let ns_name = args
+            .first()
+            .map(|n| self.node_text(*n).trim().to_string())
+            .unwrap_or_default();
+        if ns_name.is_empty() {
+            return;
+        }
+        let body_node = args
+            .iter()
+            .skip(1)
+            .find(|a| a.kind() == "braced_word" || a.kind() == "braced_word_simple");
+
+        self.namespace_stack.push(ns_name);
+        let full_ns = self.current_namespace().unwrap_or_default();
+
+        let class = ClassEntity {
+            name: full_ns,
+            visibility: "public".to_string(),
+            line_start: cmd_node.start_position().row + 1,
+            line_end: cmd_node.end_position().row + 1,
+            is_abstract: false,
+            is_interface: false,
+            base_classes: Vec::new(),
+            implemented_traits: Vec::new(),
+            methods: Vec::new(),
+            fields: Vec::new(),
+            doc_comment: None,
+            attributes: vec!["namespace".to_string()],
+            type_parameters: Vec::new(),
+        };
+        self.classes.push(class);
+
+        if let Some(bn) = body_node {
+            self.visit_braced_body(*bn);
+        }
+
+        self.namespace_stack.pop();
     }
 
     // ── Proc handling (unified) ─────────────────────────────────────────
@@ -196,7 +592,15 @@ impl<'a> TclVisitor<'a> {
             }
         });
 
-        let complexity = match body_node {
+        // Collect scattered body args when body braces are fragmented.
+        // The word_list will have: braced_word(params), ERROR("{"), simple_word(keyword), ...
+        let scattered_body = if body_node.is_none() {
+            self.collect_scattered_body_args(node)
+        } else {
+            Vec::new()
+        };
+
+        let mut complexity = match body_node {
             Some(bn) => self.calculate_complexity(bn),
             None => ComplexityMetrics {
                 cyclomatic_complexity: 1,
@@ -208,6 +612,27 @@ impl<'a> TclVisitor<'a> {
                 early_returns: 0,
             },
         };
+
+        // Add complexity from scattered body keywords
+        for arg in &scattered_body {
+            let text = self.node_text(*arg);
+            let trimmed = text.trim();
+            match trimmed {
+                "if" | "elseif" => {
+                    complexity.cyclomatic_complexity += 1;
+                    complexity.branches += 1;
+                }
+                "while" | "foreach" | "for" => {
+                    complexity.cyclomatic_complexity += 1;
+                    complexity.loops += 1;
+                }
+                "catch" => {
+                    complexity.cyclomatic_complexity += 1;
+                    complexity.exception_handlers += 1;
+                }
+                _ => {}
+            }
+        }
 
         let param_str = params
             .iter()
@@ -244,6 +669,15 @@ impl<'a> TclVisitor<'a> {
                 self.visit_arguments_body(bn);
             } else {
                 self.visit_braced_body(bn);
+            }
+        } else {
+            // Scan scattered body args for keyword calls
+            for arg in &scattered_body {
+                let text = self.node_text(*arg);
+                let trimmed = text.trim();
+                if TCL_KEYWORDS.contains(&trimmed) {
+                    self.record_call(trimmed, *arg);
+                }
             }
         }
         self.current_procedure = prev_proc;
@@ -282,6 +716,19 @@ impl<'a> TclVisitor<'a> {
                     found_proc = true;
                     continue;
                 }
+                // Nested ERROR wrapping proc keyword: ERROR(ERROR(proc)) or ERROR(proc)
+                "ERROR" if !found_proc => {
+                    let mut ic = child.walk();
+                    for inner in child.children(&mut ic) {
+                        if inner.kind() == "proc" {
+                            found_proc = true;
+                            break;
+                        }
+                    }
+                    if found_proc {
+                        continue;
+                    }
+                }
                 // Comments case: rest of proc parsed as a command child
                 "command" if found_proc => {
                     if let Some(name_node) = child.child_by_field_name("name") {
@@ -291,12 +738,22 @@ impl<'a> TclVisitor<'a> {
                     }
                     if let Some(args_node) = child.child_by_field_name("arguments") {
                         let mut ic = args_node.walk();
+                        let mut body_brace_broken = false;
                         for inner in args_node.children(&mut ic) {
+                            // Detect fragmented body: ERROR("{") after params means
+                            // the body braces are broken and subsequent braced_words
+                            // are NOT the proc body.
+                            if inner.kind() == "ERROR" && params_node.is_some() {
+                                let text = self.node_text(inner);
+                                if text.trim() == "{" {
+                                    body_brace_broken = true;
+                                }
+                            }
                             if inner.kind() == "braced_word" || inner.kind() == "braced_word_simple"
                             {
                                 if params_node.is_none() {
                                     params_node = Some(inner);
-                                } else if body_node.is_none() {
+                                } else if body_node.is_none() && !body_brace_broken {
                                     body_node = Some(inner);
                                 }
                             }
@@ -411,6 +868,7 @@ impl<'a> TclVisitor<'a> {
 
     /// Extract namespace name/body from ERROR/procedure node trees.
     fn extract_namespace_from_tree<'b>(&self, node: Node<'b>) -> (String, Option<Node<'b>>) {
+        let mut found_namespace = false;
         let mut found_eval = false;
         let mut ns_name = String::new();
         let mut body_node: Option<Node<'b>> = None;
@@ -420,7 +878,41 @@ impl<'a> TclVisitor<'a> {
 
         for child in &children {
             match child.kind() {
-                "namespace" => continue,
+                "namespace" => {
+                    found_namespace = true;
+                    continue;
+                }
+                // Handle ERROR(namespace) child — detect the keyword inside
+                "ERROR" if !found_namespace => {
+                    let mut ic = child.walk();
+                    for inner in child.children(&mut ic) {
+                        if inner.kind() == "namespace" {
+                            found_namespace = true;
+                            break;
+                        }
+                    }
+                    if found_namespace {
+                        continue;
+                    }
+                }
+                // Handle split case: ERROR(namespace) + command(eval name {body})
+                "command" if found_namespace && !found_eval => {
+                    let cmd_name = self.extract_command_name(*child);
+                    if cmd_name == "eval" {
+                        found_eval = true;
+                        let args = self.collect_argument_nodes(*child);
+                        if let Some(name_node) = args.first() {
+                            ns_name = self.node_text(*name_node).trim().to_string();
+                        }
+                        for arg in args.iter().skip(1) {
+                            if (arg.kind() == "braced_word" || arg.kind() == "braced_word_simple")
+                                && body_node.is_none()
+                            {
+                                body_node = Some(*arg);
+                            }
+                        }
+                    }
+                }
                 // Multi-line case: namespace node has a word_list child
                 // containing eval, name, and braced_word body.
                 "word_list" => {
@@ -498,6 +990,32 @@ impl<'a> TclVisitor<'a> {
     }
 
     fn visit_general_command(&mut self, cmd_name: &str, node: Node) {
+        // Check for collapsed word_list: the grammar may merge multiple lines
+        // into one giant word_list when bracket expressions ([...]) are present.
+        // Detect and split at embedded SDC/EDA command boundaries.
+        if sdc::is_sdc_command(cmd_name) || eda::is_eda_command(cmd_name) {
+            if let Some(args_node) = node.child_by_field_name("arguments") {
+                if args_node.kind() == "word_list" {
+                    let has_embedded = {
+                        let mut c = args_node.walk();
+                        let result = args_node.children(&mut c).any(|child| {
+                            if child.kind() == "simple_word" {
+                                let text = child.utf8_text(self.source).unwrap_or("").trim();
+                                sdc::is_sdc_command(text) || eda::is_eda_command(text)
+                            } else {
+                                false
+                            }
+                        });
+                        result
+                    };
+                    if has_embedded {
+                        self.visit_collapsed_commands(cmd_name, node);
+                        return;
+                    }
+                }
+            }
+        }
+
         if sdc::is_sdc_command(cmd_name) {
             if let Some(constraint) = sdc::extract_sdc_constraint(cmd_name, node, self.source) {
                 self.sdc_data.add(constraint);
@@ -544,6 +1062,55 @@ impl<'a> TclVisitor<'a> {
         }
 
         self.record_call(cmd_name, node);
+    }
+
+    /// Handle a collapsed word_list where the grammar merged multiple command
+    /// lines into a single command node. Splits at SDC/EDA command boundaries
+    /// and processes each segment independently.
+    fn visit_collapsed_commands(&mut self, first_cmd: &str, node: Node) {
+        let args_node = match node.child_by_field_name("arguments") {
+            Some(a) if a.kind() == "word_list" => a,
+            _ => return,
+        };
+
+        let mut cursor = args_node.walk();
+        let children: Vec<Node> = args_node.children(&mut cursor).collect();
+
+        // Build segments: each segment is (cmd_name, args as strings)
+        let mut segments: Vec<(String, Vec<String>)> = Vec::new();
+        let mut current_cmd = first_cmd.to_string();
+        let mut current_args: Vec<String> = Vec::new();
+
+        for child in &children {
+            let text = child
+                .utf8_text(self.source)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if child.kind() == "simple_word"
+                && (sdc::is_sdc_command(&text) || eda::is_eda_command(&text))
+            {
+                // Start of a new command — flush the current one
+                segments.push((current_cmd, current_args));
+                current_cmd = text;
+                current_args = Vec::new();
+            } else if !text.is_empty() {
+                current_args.push(text);
+            }
+        }
+        segments.push((current_cmd, current_args));
+
+        // Process each segment
+        for (cmd_name, args) in &segments {
+            if sdc::is_sdc_command(cmd_name) {
+                if let Some(constraint) = sdc::extract_sdc_from_args(cmd_name, args) {
+                    self.sdc_data.add(constraint);
+                }
+                self.record_call(cmd_name, node);
+            } else if eda::is_eda_command(cmd_name) {
+                self.record_call(cmd_name, node);
+            }
+        }
     }
 
     fn visit_source_command(&mut self, node: Node) {
@@ -835,6 +1402,48 @@ impl<'a> TclVisitor<'a> {
                 }
             }
         }
+    }
+
+    /// Collect scattered body content from a proc node's command child.
+    ///
+    /// When the body `{` is fragmented (becomes ERROR), body content scatters
+    /// as simple_word siblings in the command's word_list. This method finds
+    /// those simple_words that appear after the params braced_word.
+    fn collect_scattered_body_args<'b>(&self, node: Node<'b>) -> Vec<Node<'b>> {
+        let mut result = Vec::new();
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() != "command" {
+                continue;
+            }
+            if let Some(args_node) = child.child_by_field_name("arguments") {
+                if args_node.kind() != "word_list" {
+                    continue;
+                }
+                let mut ic = args_node.walk();
+                let mut past_params = false;
+                let mut past_error_brace = false;
+                for inner in args_node.children(&mut ic) {
+                    if !past_params {
+                        if inner.kind() == "braced_word" || inner.kind() == "braced_word_simple" {
+                            past_params = true;
+                        }
+                        continue;
+                    }
+                    if !past_error_brace {
+                        if inner.kind() == "ERROR" {
+                            past_error_brace = true;
+                        }
+                        continue;
+                    }
+                    // Everything after params + ERROR("{") is scattered body content
+                    if inner.kind() == "simple_word" || inner.kind() == "word" {
+                        result.push(inner);
+                    }
+                }
+            }
+        }
+        result
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
