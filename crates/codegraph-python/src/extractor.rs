@@ -241,6 +241,7 @@ fn extract_function(
     func.is_async = is_async;
     func.is_static = is_static;
     func.is_test = is_test;
+    func.attributes = decorators;
     func.complexity = complexity;
 
     if let Some(class_name) = parent_class {

@@ -1,7 +1,7 @@
 // Tests for CodeParser trait implementation
 // Following TDD approach
 
-use codegraph::CodeGraph;
+use codegraph::{CodeGraph, NodeType};
 use codegraph_parser_api::{CodeParser, ParserConfig, ParserError};
 use codegraph_python::PythonParser;
 use std::path::{Path, PathBuf};
@@ -270,7 +270,16 @@ async def fetch_data():
     let file_info = result.unwrap();
     assert_eq!(file_info.functions.len(), 1);
 
-    // TODO: Verify the function is marked as async in the graph
+    // Verify the function is marked as async in the graph
+    let func_ids = graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap();
+    assert_eq!(func_ids.len(), 1);
+    let node = graph.get_node(func_ids[0]).unwrap();
+    assert_eq!(node.properties.get_string("name"), Some("fetch_data"));
+    assert_eq!(node.properties.get_bool("is_async"), Some(true));
 }
 
 #[test]
@@ -287,7 +296,21 @@ def decorated_func():
     let result = parser.parse_source(source, Path::new("test.py"), &mut graph);
     assert!(result.is_ok());
 
-    // TODO: Verify decorators are captured
+    // Verify decorators are captured
+    let func_ids = graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap();
+    assert_eq!(func_ids.len(), 1);
+    let node = graph.get_node(func_ids[0]).unwrap();
+    assert_eq!(node.properties.get_string("name"), Some("decorated_func"));
+    let attrs = node.properties.get_string("attributes").unwrap();
+    assert!(
+        attrs.contains("property"),
+        "Expected @property decorator in attributes, got: {:?}",
+        attrs
+    );
 }
 
 #[test]

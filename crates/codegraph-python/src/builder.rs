@@ -34,7 +34,9 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
             .with("line_end", func.line_end as i64)
             .with("visibility", func.visibility.clone())
             .with("is_async", func.is_async)
-            .with("is_test", func.is_test);
+            .with("is_static", func.is_static)
+            .with("is_test", func.is_test)
+            .with("attributes", func.attributes.join(","));
 
         // Add complexity metrics if available
         if let Some(ref complexity) = func.complexity {
@@ -107,14 +109,39 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
         }
     }
 
-    // TODO: Add import relationships
-    // Note: helpers::add_import requires both from_file_id and to_file_id (NodeIds)
-    // We would need to:
-    // 1. Track or create file nodes for imported modules
-    // 2. Convert module names to file paths
-    // 3. Create file nodes if they don't exist
-    // This is deferred to a future iteration
-    let _ = &ir.imports; // Suppress unused warning
+    // Add import relationships
+    for import in &ir.imports {
+        let imported_module = &import.imported;
+
+        let import_id = if let Some(&existing_id) = entity_map.get(imported_module) {
+            existing_id
+        } else {
+            let is_external = !imported_module.starts_with('.');
+            let props = PropertyMap::new()
+                .with("name", imported_module.clone())
+                .with("is_external", is_external.to_string());
+
+            let id = graph
+                .add_node(NodeType::Module, props)
+                .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+            entity_map.insert(imported_module.clone(), id);
+            id
+        };
+
+        let mut edge_props = PropertyMap::new();
+        if let Some(ref alias) = import.alias {
+            edge_props = edge_props.with("alias", alias.clone());
+        }
+        if import.is_wildcard {
+            edge_props = edge_props.with("is_wildcard", "true");
+        }
+        if !import.symbols.is_empty() {
+            edge_props = edge_props.with("symbols", import.symbols.join(","));
+        }
+        graph
+            .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
+            .map_err(|e| crate::error::ParseError::GraphError(e.to_string()))?;
+    }
 
     Ok(file_id)
 }

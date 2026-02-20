@@ -114,8 +114,10 @@ impl PythonParser {
                 .with("visibility", func.visibility.clone())
                 .with("line_start", func.line_start.to_string())
                 .with("line_end", func.line_end.to_string())
-                .with("is_async", func.is_async.to_string())
-                .with("is_static", func.is_static.to_string());
+                .with("is_async", func.is_async)
+                .with("is_static", func.is_static)
+                .with("is_test", func.is_test)
+                .with("attributes", func.attributes.join(","));
 
             if let Some(ref doc) = func.doc_comment {
                 props = props.with("doc", doc.clone());
