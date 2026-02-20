@@ -31,6 +31,9 @@ pub fn extract(
     })?;
 
     let root_node = tree.root_node();
+    // Note: NOT checking root_node.has_error() here — tree-sitter-tcl's vendored grammar
+    // intentionally produces ERROR nodes for keywords (proc, namespace, if, etc.) which
+    // are resolved by sibling-stitching in the visitor. has_error() would reject valid Tcl.
 
     let mut ir = CodeIR::new(file_path.to_path_buf());
 

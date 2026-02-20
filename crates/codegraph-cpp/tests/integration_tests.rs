@@ -304,3 +304,17 @@ void test() {}
     assert_eq!(system_count, 2, "Expected 2 system includes");
     assert_eq!(local_count, 2, "Expected 2 local includes");
 }
+
+#[test]
+fn test_syntax_error() {
+    let source = r#"
+class Broken {
+    void method( {
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CppParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.cpp"), &mut graph);
+    assert!(result.is_err());
+}

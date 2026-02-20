@@ -382,3 +382,16 @@ class Example {
     assert!(visibilities.contains(&"protected".to_string()));
     assert!(visibilities.contains(&"public".to_string()));
 }
+
+#[test]
+fn test_syntax_error() {
+    let source = r#"<?php
+function broken( {
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = PhpParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.php"), &mut graph);
+    assert!(result.is_err());
+}

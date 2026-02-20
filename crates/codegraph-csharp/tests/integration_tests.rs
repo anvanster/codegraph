@@ -262,3 +262,17 @@ fn test_parse_sample_app_summary() {
     assert!(!file_info.traits.is_empty());
     assert!(!file_info.functions.is_empty());
 }
+
+#[test]
+fn test_syntax_error() {
+    let source = r#"
+class Broken {
+    void Method( {
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CSharpParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.cs"), &mut graph);
+    assert!(result.is_err());
+}

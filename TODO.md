@@ -1,4 +1,4 @@
-Last updated: 2026-02-19
+Last updated: 2026-02-20
 
 # codegraph-monorepo TODO
 
@@ -9,14 +9,16 @@ _(none — all items completed)_
 ## Medium Priority
 
 ### 4. Consistent error handling for syntax errors across all parsers
-- codegraph-c now uses strict mode (fixed); verify other parsers follow the same convention
-- Convention: parsers return `Err` for unparseable files (tree-sitter `has_error()` check)
-- Rust, Go, Python, C all follow this; check remaining parsers (cpp, java, kotlin, etc.)
+- Convention: parsers return `Err` for unparseable files (tree-sitter `has_error()` check in extractor)
+- **Have `has_error()` check**: C, Go, Python, Rust, TypeScript (5 of 13)
+- **Missing `has_error()` check**: cpp, csharp, java, kotlin, php, ruby, swift, tcl (8 parsers)
+- codegraph-tcl may need special handling due to vendored grammar quirks
 
-### 5. codegraph-python VisitorContext is unused
-- `VisitorContext` struct and methods in `crates/codegraph-python/src/visitor.rs` are defined but never constructed
-- Currently suppressed with `#[allow(dead_code)]`
-- Decision: integrate into the extractor for scope tracking, or remove dead code
+### 5. Dead `#[allow(dead_code)]` across visitor modules
+- Originally noted for codegraph-python `VisitorContext` — still only used in tests, not in extractor
+- Pattern is widespread: `#[allow(dead_code)]` found in 11 of 13 parser visitor modules
+- Decision per parser: integrate dead structs into extractors, or remove them
+- Python, Kotlin, Tcl, Ruby have the most suppressed items
 
 ### 6. Expand test coverage for recent features
 - cpp: system include distinction (`is_system` property) — added in `1256a12`
@@ -69,6 +71,6 @@ _(none — all items completed)_
 
 ## Workspace Health
 
-- **Total tests**: 264+ passing, 0 failing
-- **Crates**: 14 (core + parser-api + 12 language parsers)
+- **Total tests**: 1012 passing, 0 failing
+- **Crates**: 15 (core + parser-api + 13 language parsers)
 - **Clippy**: clean

@@ -228,3 +228,17 @@ fn test_parse_sample_app_summary() {
     assert!(!file_info.traits.is_empty());
     assert!(!file_info.functions.is_empty());
 }
+
+#[test]
+fn test_syntax_error() {
+    let source = r#"
+public class Broken {
+    public void method( {
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = JavaParser::new();
+
+    let result = parser.parse_source(source, Path::new("Test.java"), &mut graph);
+    assert!(result.is_err());
+}

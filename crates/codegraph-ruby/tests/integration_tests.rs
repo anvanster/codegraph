@@ -264,3 +264,17 @@ require_relative '../lib/utils'
     assert_eq!(external_count, 2, "Expected 2 external requires");
     assert_eq!(relative_count, 2, "Expected 2 require_relative");
 }
+
+#[test]
+fn test_syntax_error() {
+    let source = r#"
+def broken(
+    puts "missing closing paren"
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = RubyParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.rb"), &mut graph);
+    assert!(result.is_err());
+}

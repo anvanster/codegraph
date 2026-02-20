@@ -24,8 +24,14 @@ pub fn extract(
 
     let root_node = tree.root_node();
 
-    // PHP with tree-sitter-php uses tolerant parsing, so we don't fail on errors
-    // but instead try to extract what we can
+    if root_node.has_error() {
+        return Err(ParserError::SyntaxError(
+            file_path.to_path_buf(),
+            0,
+            0,
+            "Syntax error".to_string(),
+        ));
+    }
 
     let mut ir = CodeIR::new(file_path.to_path_buf());
 

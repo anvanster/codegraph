@@ -271,3 +271,16 @@ class Cat: Animal {
     let file_info = result.unwrap();
     assert_eq!(file_info.classes.len(), 3, "Expected 3 classes");
 }
+
+#[test]
+fn test_syntax_error() {
+    let source = r#"
+func broken( {
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = SwiftParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.swift"), &mut graph);
+    assert!(result.is_err());
+}
