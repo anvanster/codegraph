@@ -187,14 +187,20 @@ impl<'a> TypeScriptVisitor<'a> {
             Vec::new()
         };
 
-        // Check if method is static or async
+        // Check modifiers from the method signature (first line only to avoid body matches)
         let node_text = self.node_text(node);
-        let is_static = node_text.contains("static ");
-        let is_async = node_text.contains("async ");
+        let first_line = node_text.lines().next().unwrap_or("");
+        let is_static = first_line.contains("static ");
+        let is_async = first_line.contains("async ");
 
-        // Determine visibility (private/public based on # prefix in name or explicit keyword)
-        let visibility = if name.starts_with('#') {
+        // Determine visibility from TS keywords or JS # prefix
+        let visibility = if name.starts_with('#')
+            || first_line.starts_with("private ")
+            || first_line.contains(" private ")
+        {
             "private".to_string()
+        } else if first_line.starts_with("protected ") || first_line.contains(" protected ") {
+            "protected".to_string()
         } else {
             "public".to_string()
         };
