@@ -23,7 +23,7 @@ pub fn ir_to_graph(
             .with("name", module.name.clone())
             .with("path", module.path.clone())
             .with("language", module.language.clone())
-            .with("line_count", module.line_count.to_string());
+            .with("line_count", module.line_count as i64);
 
         if let Some(ref doc) = module.doc_comment {
             props = props.with("doc", doc.clone());
@@ -265,7 +265,7 @@ pub fn ir_to_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codegraph_parser_api::{ClassEntity, FunctionEntity, ImportRelation};
+    use codegraph_parser_api::{ClassEntity, FunctionEntity, ImportRelation, ModuleEntity};
     use std::path::PathBuf;
 
     #[test]
@@ -426,6 +426,50 @@ mod tests {
         assert_eq!(
             func_node.properties.get("complexity_grade"),
             Some(&codegraph::PropertyValue::String("B".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_property_types() {
+        use codegraph::PropertyValue;
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.c"));
+        ir.module = Some(ModuleEntity::new("test", "test.c", "c").with_line_count(100));
+        let func = FunctionEntity::new("test_fn", 10, 20)
+            .with_signature("fn test_fn()")
+            .with_visibility("public");
+        ir.functions.push(func);
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = ir_to_graph(&ir, &mut graph, std::path::Path::new("test.c")).unwrap();
+
+        // Verify file node line_count is Int
+        let file_node = graph.get_node(file_info.file_id).unwrap();
+        assert!(
+            matches!(
+                file_node.properties.get("line_count"),
+                Some(PropertyValue::Int(100))
+            ),
+            "line_count should be Int, got {:?}",
+            file_node.properties.get("line_count")
+        );
+
+        // Verify function properties are correct types
+        let func_node = graph.get_node(file_info.functions[0]).unwrap();
+        assert!(
+            matches!(
+                func_node.properties.get("line_start"),
+                Some(PropertyValue::Int(10))
+            ),
+            "line_start should be Int(10), got {:?}",
+            func_node.properties.get("line_start")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("line_end"),
+                Some(PropertyValue::Int(20))
+            ),
+            "line_end should be Int(20), got {:?}",
+            func_node.properties.get("line_end")
         );
     }
 }

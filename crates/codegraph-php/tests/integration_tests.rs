@@ -319,10 +319,7 @@ abstract class BaseController {
     assert_eq!(file_info.classes.len(), 1);
 
     let class_node = graph.get_node(file_info.classes[0]).unwrap();
-    assert_eq!(
-        class_node.properties.get_string("is_abstract"),
-        Some("true")
-    );
+    assert_eq!(class_node.properties.get_bool("is_abstract"), Some(true));
 }
 
 #[test]
@@ -345,7 +342,7 @@ class Helper {
     assert!(!file_info.functions.is_empty());
 
     let func_node = graph.get_node(file_info.functions[0]).unwrap();
-    assert_eq!(func_node.properties.get_string("is_static"), Some("true"));
+    assert_eq!(func_node.properties.get_bool("is_static"), Some(true));
 }
 
 #[test]

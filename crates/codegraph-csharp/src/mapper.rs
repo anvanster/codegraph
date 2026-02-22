@@ -23,7 +23,7 @@ pub fn ir_to_graph(
             .with("name", module.name.clone())
             .with("path", module.path.clone())
             .with("language", module.language.clone())
-            .with("line_count", module.line_count.to_string());
+            .with("line_count", module.line_count as i64);
 
         if let Some(ref doc) = module.doc_comment {
             props = props.with("doc", doc.clone());
@@ -61,10 +61,10 @@ pub fn ir_to_graph(
             .with("visibility", func.visibility.clone())
             .with("line_start", func.line_start as i64)
             .with("line_end", func.line_end as i64)
-            .with("is_async", func.is_async.to_string())
-            .with("is_static", func.is_static.to_string())
-            .with("is_abstract", func.is_abstract.to_string())
-            .with("is_test", func.is_test.to_string());
+            .with("is_async", func.is_async)
+            .with("is_static", func.is_static)
+            .with("is_abstract", func.is_abstract)
+            .with("is_test", func.is_test);
 
         if let Some(ref doc) = func.doc_comment {
             props = props.with("doc", doc.clone());
@@ -129,7 +129,7 @@ pub fn ir_to_graph(
             .with("visibility", class.visibility.clone())
             .with("line_start", class.line_start as i64)
             .with("line_end", class.line_end as i64)
-            .with("is_abstract", class.is_abstract.to_string());
+            .with("is_abstract", class.is_abstract);
 
         if let Some(ref doc) = class.doc_comment {
             props = props.with("doc", doc.clone());
@@ -262,8 +262,8 @@ pub fn ir_to_graph(
         if let Some(&caller_id) = node_map.get(&call.caller) {
             if let Some(&callee_id) = node_map.get(&call.callee) {
                 let edge_props = PropertyMap::new()
-                    .with("call_site_line", call.call_site_line.to_string())
-                    .with("is_direct", call.is_direct.to_string());
+                    .with("call_site_line", call.call_site_line as i64)
+                    .with("is_direct", call.is_direct);
 
                 graph
                     .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
@@ -307,7 +307,7 @@ pub fn ir_to_graph(
             node_map.get(&inheritance.child),
             node_map.get(&inheritance.parent),
         ) {
-            let edge_props = PropertyMap::new().with("order", inheritance.order.to_string());
+            let edge_props = PropertyMap::new().with("order", inheritance.order as i64);
 
             graph
                 .add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
@@ -550,6 +550,58 @@ mod tests {
             edge.edge_type,
             EdgeType::Extends,
             "Edge should be of type Extends"
+        );
+    }
+
+    #[test]
+    fn test_property_types() {
+        use codegraph::PropertyValue;
+        use codegraph_parser_api::{FunctionEntity, ModuleEntity};
+
+        let mut ir = CodeIR::default();
+        ir.set_module(ModuleEntity::new("test", "test.cs", "csharp").with_line_count(100));
+        let func = FunctionEntity::new("test_fn", 10, 20).async_fn();
+        ir.add_function(func);
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = ir_to_graph(&ir, &mut graph, std::path::Path::new("test.cs")).unwrap();
+
+        // Verify file node line_count is Int
+        let file_node = graph.get_node(file_info.file_id).unwrap();
+        assert!(
+            matches!(
+                file_node.properties.get("line_count"),
+                Some(PropertyValue::Int(100))
+            ),
+            "line_count should be Int, got {:?}",
+            file_node.properties.get("line_count")
+        );
+
+        // Verify function properties are correct types
+        let func_node = graph.get_node(file_info.functions[0]).unwrap();
+        assert!(
+            matches!(
+                func_node.properties.get("line_start"),
+                Some(PropertyValue::Int(10))
+            ),
+            "line_start should be Int(10), got {:?}",
+            func_node.properties.get("line_start")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("line_end"),
+                Some(PropertyValue::Int(20))
+            ),
+            "line_end should be Int(20), got {:?}",
+            func_node.properties.get("line_end")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("is_async"),
+                Some(PropertyValue::Bool(true))
+            ),
+            "is_async should be Bool(true), got {:?}",
+            func_node.properties.get("is_async")
         );
     }
 }

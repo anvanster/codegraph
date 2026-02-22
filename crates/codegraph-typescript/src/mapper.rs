@@ -274,7 +274,7 @@ pub fn ir_to_graph(
             let is_external = resolved_path.is_none();
             let props = PropertyMap::new()
                 .with("name", imported_module.clone())
-                .with("is_external", is_external.to_string());
+                .with("is_external", is_external);
 
             let id = graph
                 .add_node(NodeType::Module, props)
@@ -304,8 +304,8 @@ pub fn ir_to_graph(
             if let Some(&callee_id) = node_map.get(&call.callee) {
                 // Both caller and callee are in this file - create direct edge
                 let edge_props = PropertyMap::new()
-                    .with("call_site_line", call.call_site_line.to_string())
-                    .with("is_direct", call.is_direct.to_string());
+                    .with("call_site_line", call.call_site_line as i64)
+                    .with("is_direct", call.is_direct);
 
                 graph
                     .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
@@ -351,7 +351,7 @@ pub fn ir_to_graph(
             node_map.get(&inheritance.child),
             node_map.get(&inheritance.parent),
         ) {
-            let edge_props = PropertyMap::new().with("order", inheritance.order.to_string());
+            let edge_props = PropertyMap::new().with("order", inheritance.order as i64);
 
             graph
                 .add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
@@ -392,7 +392,7 @@ pub fn ir_to_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codegraph_parser_api::{ClassEntity, FunctionEntity, TraitEntity};
+    use codegraph_parser_api::{ClassEntity, FunctionEntity, ModuleEntity, TraitEntity};
     use std::path::PathBuf;
 
     #[test]
@@ -890,10 +890,7 @@ mod tests {
         let import_node = graph.get_node(file_info.imports[0]).unwrap();
         assert_eq!(import_node.node_type, NodeType::Module);
         assert_eq!(import_node.properties.get_string("name"), Some("react"));
-        assert_eq!(
-            import_node.properties.get_string("is_external"),
-            Some("true")
-        );
+        assert_eq!(import_node.properties.get_bool("is_external"), Some(true));
     }
 
     #[test]
@@ -940,6 +937,59 @@ mod tests {
         assert!(
             found_resolved_path,
             "Import edge should have resolved_path property for relative imports"
+        );
+    }
+
+    #[test]
+    fn test_property_types() {
+        use codegraph::PropertyValue;
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.ts"));
+        ir.module = Some(ModuleEntity::new("test", "test.ts", "typescript").with_line_count(100));
+        let func = FunctionEntity::new("test_fn", 10, 20)
+            .with_signature("fn test_fn()")
+            .with_visibility("public")
+            .async_fn();
+        ir.functions.push(func);
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = ir_to_graph(&ir, &mut graph, std::path::Path::new("test.ts")).unwrap();
+
+        // Verify file node line_count is Int
+        let file_node = graph.get_node(file_info.file_id).unwrap();
+        assert!(
+            matches!(
+                file_node.properties.get("line_count"),
+                Some(PropertyValue::Int(100))
+            ),
+            "line_count should be Int, got {:?}",
+            file_node.properties.get("line_count")
+        );
+
+        // Verify function properties are correct types
+        let func_node = graph.get_node(file_info.functions[0]).unwrap();
+        assert!(
+            matches!(
+                func_node.properties.get("line_start"),
+                Some(PropertyValue::Int(10))
+            ),
+            "line_start should be Int(10), got {:?}",
+            func_node.properties.get("line_start")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("line_end"),
+                Some(PropertyValue::Int(20))
+            ),
+            "line_end should be Int(20), got {:?}",
+            func_node.properties.get("line_end")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("is_async"),
+                Some(PropertyValue::Bool(true))
+            ),
+            "is_async should be Bool(true), got {:?}",
+            func_node.properties.get("is_async")
         );
     }
 }

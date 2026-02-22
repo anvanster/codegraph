@@ -23,7 +23,7 @@ pub fn ir_to_graph(
             .with("name", module.name.clone())
             .with("path", module.path.clone())
             .with("language", module.language.clone())
-            .with("line_count", module.line_count.to_string());
+            .with("line_count", module.line_count as i64);
 
         if let Some(ref doc) = module.doc_comment {
             props = props.with("doc", doc.clone());
@@ -61,9 +61,9 @@ pub fn ir_to_graph(
             .with("visibility", func.visibility.clone())
             .with("line_start", func.line_start as i64)
             .with("line_end", func.line_end as i64)
-            .with("is_async", func.is_async.to_string())
-            .with("is_static", func.is_static.to_string())
-            .with("is_abstract", func.is_abstract.to_string());
+            .with("is_async", func.is_async)
+            .with("is_static", func.is_static)
+            .with("is_abstract", func.is_abstract);
 
         if let Some(ref doc) = func.doc_comment {
             props = props.with("doc", doc.clone());
@@ -125,7 +125,7 @@ pub fn ir_to_graph(
             .with("visibility", class.visibility.clone())
             .with("line_start", class.line_start as i64)
             .with("line_end", class.line_end as i64)
-            .with("is_abstract", class.is_abstract.to_string());
+            .with("is_abstract", class.is_abstract);
 
         if let Some(ref doc) = class.doc_comment {
             props = props.with("doc", doc.clone());
@@ -224,7 +224,7 @@ pub fn ir_to_graph(
             let is_external = !is_include;
             let mut props = PropertyMap::new()
                 .with("name", imported_module.clone())
-                .with("is_external", is_external.to_string());
+                .with("is_external", is_external);
             if is_include {
                 props = props.with("is_include", "true");
                 if let Some(ref kind) = import.alias {
@@ -267,8 +267,8 @@ pub fn ir_to_graph(
         if let Some(&caller_id) = node_map.get(&call.caller) {
             if let Some(&callee_id) = node_map.get(&call.callee) {
                 let edge_props = PropertyMap::new()
-                    .with("call_site_line", call.call_site_line.to_string())
-                    .with("is_direct", call.is_direct.to_string());
+                    .with("call_site_line", call.call_site_line as i64)
+                    .with("is_direct", call.is_direct);
 
                 graph
                     .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
@@ -312,7 +312,7 @@ pub fn ir_to_graph(
             node_map.get(&inheritance.child),
             node_map.get(&inheritance.parent),
         ) {
-            let edge_props = PropertyMap::new().with("order", inheritance.order.to_string());
+            let edge_props = PropertyMap::new().with("order", inheritance.order as i64);
 
             graph
                 .add_edge(child_id, parent_id, EdgeType::Extends, edge_props)
@@ -579,8 +579,8 @@ mod tests {
         // include/require should be internal
         let include_node = graph.get_node(file_info.imports[0]).unwrap();
         assert_eq!(
-            include_node.properties.get_string("is_external"),
-            Some("false"),
+            include_node.properties.get_bool("is_external"),
+            Some(false),
             "include/require should be marked as internal"
         );
         assert_eq!(
@@ -597,8 +597,8 @@ mod tests {
         // namespace use should be external
         let use_node = graph.get_node(file_info.imports[1]).unwrap();
         assert_eq!(
-            use_node.properties.get_string("is_external"),
-            Some("true"),
+            use_node.properties.get_bool("is_external"),
+            Some(true),
             "namespace use should be marked as external"
         );
     }
@@ -628,9 +628,61 @@ mod tests {
             module_node.properties.get_string("is_include"),
             Some("true"),
         );
-        assert_eq!(
-            module_node.properties.get_string("is_external"),
-            Some("false"),
+        assert_eq!(module_node.properties.get_bool("is_external"), Some(false),);
+    }
+
+    #[test]
+    fn test_property_types() {
+        use codegraph::PropertyValue;
+        let mut ir = CodeIR::new(PathBuf::from("test.php"));
+        ir.set_module(
+            codegraph_parser_api::ModuleEntity::new("test", "test.php", "php").with_line_count(100),
+        );
+        let func = FunctionEntity::new("test_fn", 10, 20)
+            .with_signature("function test_fn()")
+            .with_visibility("public")
+            .async_fn();
+        ir.add_function(func);
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let file_info = ir_to_graph(&ir, &mut graph, PathBuf::from("test.php").as_path()).unwrap();
+
+        // Verify file node line_count is Int
+        let file_node = graph.get_node(file_info.file_id).unwrap();
+        assert!(
+            matches!(
+                file_node.properties.get("line_count"),
+                Some(PropertyValue::Int(100))
+            ),
+            "line_count should be Int, got {:?}",
+            file_node.properties.get("line_count")
+        );
+
+        // Verify function properties are correct types
+        let func_node = graph.get_node(file_info.functions[0]).unwrap();
+        assert!(
+            matches!(
+                func_node.properties.get("line_start"),
+                Some(PropertyValue::Int(10))
+            ),
+            "line_start should be Int(10), got {:?}",
+            func_node.properties.get("line_start")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("line_end"),
+                Some(PropertyValue::Int(20))
+            ),
+            "line_end should be Int(20), got {:?}",
+            func_node.properties.get("line_end")
+        );
+        assert!(
+            matches!(
+                func_node.properties.get("is_async"),
+                Some(PropertyValue::Bool(true))
+            ),
+            "is_async should be Bool(true), got {:?}",
+            func_node.properties.get("is_async")
         );
     }
 }

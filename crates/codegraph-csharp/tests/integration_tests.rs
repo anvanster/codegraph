@@ -124,16 +124,11 @@ fn test_parse_sample_app_methods() {
         if let Some(codegraph::PropertyValue::String(name)) = node.properties.get("name") {
             method_names.push(name.clone());
         }
-        if let Some(codegraph::PropertyValue::String(is_async)) = node.properties.get("is_async") {
-            if is_async == "true" {
-                async_count += 1;
-            }
+        if node.properties.get_bool("is_async") == Some(true) {
+            async_count += 1;
         }
-        if let Some(codegraph::PropertyValue::String(is_static)) = node.properties.get("is_static")
-        {
-            if is_static == "true" {
-                static_count += 1;
-            }
+        if node.properties.get_bool("is_static") == Some(true) {
+            static_count += 1;
         }
     }
 
