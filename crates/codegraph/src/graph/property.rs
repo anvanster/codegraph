@@ -138,9 +138,12 @@ impl PropertyMap {
     }
 
     /// Type-safe getter for integer properties.
+    /// Also parses string values as integers for backwards compatibility
+    /// (some mappers stored line numbers as strings).
     pub fn get_int(&self, key: &str) -> Option<i64> {
         match self.data.get(key) {
             Some(PropertyValue::Int(i)) => Some(*i),
+            Some(PropertyValue::String(s)) => s.parse::<i64>().ok(),
             _ => None,
         }
     }
@@ -233,9 +236,26 @@ mod tests {
             .with("name", "function")
             .with("line", 10i64);
 
-        // Wrong type returns None
+        // Non-numeric string returns None
         assert_eq!(props.get_int("name"), None);
         assert_eq!(props.get_string("line"), None);
+    }
+
+    #[test]
+    fn test_get_int_parses_string_values() {
+        let props = PropertyMap::new()
+            .with("line_start", "292")
+            .with("line_end", "350")
+            .with("native_int", 42i64)
+            .with("not_a_number", "hello");
+
+        // String integers are parsed
+        assert_eq!(props.get_int("line_start"), Some(292));
+        assert_eq!(props.get_int("line_end"), Some(350));
+        // Native ints still work
+        assert_eq!(props.get_int("native_int"), Some(42));
+        // Non-numeric strings return None
+        assert_eq!(props.get_int("not_a_number"), None);
     }
 
     #[test]

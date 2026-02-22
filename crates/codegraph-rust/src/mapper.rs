@@ -64,8 +64,8 @@ pub fn ir_to_graph(
             .with("path", file_path.display().to_string())
             .with("signature", func.signature.clone())
             .with("visibility", func.visibility.clone())
-            .with("line_start", func.line_start.to_string())
-            .with("line_end", func.line_end.to_string())
+            .with("line_start", func.line_start as i64)
+            .with("line_end", func.line_end as i64)
             .with("is_async", func.is_async)
             .with("is_static", func.is_static)
             .with("is_abstract", func.is_abstract);
@@ -111,8 +111,8 @@ pub fn ir_to_graph(
             .with("name", class.name.clone())
             .with("path", file_path.display().to_string())
             .with("visibility", class.visibility.clone())
-            .with("line_start", class.line_start.to_string())
-            .with("line_end", class.line_end.to_string())
+            .with("line_start", class.line_start as i64)
+            .with("line_end", class.line_end as i64)
             .with("is_abstract", class.is_abstract.to_string())
             .with("is_interface", class.is_interface.to_string());
 
@@ -143,8 +143,8 @@ pub fn ir_to_graph(
             .with("name", trait_entity.name.clone())
             .with("path", file_path.display().to_string())
             .with("visibility", trait_entity.visibility.clone())
-            .with("line_start", trait_entity.line_start.to_string())
-            .with("line_end", trait_entity.line_end.to_string());
+            .with("line_start", trait_entity.line_start as i64)
+            .with("line_end", trait_entity.line_end as i64);
 
         if let Some(ref doc) = trait_entity.doc_comment {
             props = props.with("doc", doc.clone());

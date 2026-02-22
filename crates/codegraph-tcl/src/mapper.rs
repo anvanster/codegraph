@@ -102,8 +102,8 @@ pub fn ir_to_graph(
             .with("path", file_path.display().to_string())
             .with("signature", func.signature.clone())
             .with("visibility", func.visibility.clone())
-            .with("line_start", func.line_start.to_string())
-            .with("line_end", func.line_end.to_string())
+            .with("line_start", func.line_start as i64)
+            .with("line_end", func.line_end as i64)
             .with("is_async", func.is_async.to_string())
             .with("is_static", func.is_static.to_string())
             .with("is_abstract", func.is_abstract.to_string())
@@ -156,8 +156,8 @@ pub fn ir_to_graph(
             .with("name", class.name.clone())
             .with("path", file_path.display().to_string())
             .with("visibility", class.visibility.clone())
-            .with("line_start", class.line_start.to_string())
-            .with("line_end", class.line_end.to_string())
+            .with("line_start", class.line_start as i64)
+            .with("line_end", class.line_end as i64)
             .with("is_abstract", class.is_abstract.to_string());
 
         if let Some(ref doc) = class.doc_comment {
