@@ -1,8 +1,8 @@
 //! AST visitor for extracting C++ entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -302,6 +302,9 @@ impl<'a> CppVisitor<'a> {
         func.is_static = is_static;
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
+        func.complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
 
         if is_virtual {
             func.attributes.push("virtual".to_string());
@@ -354,6 +357,9 @@ impl<'a> CppVisitor<'a> {
         func.is_static = is_static;
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
+        func.complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
 
         if is_virtual {
             func.attributes.push("virtual".to_string());
@@ -845,6 +851,81 @@ impl<'a> CppVisitor<'a> {
             format!("{}::{}", self.current_namespace.join("::"), name)
         }
     }
+
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "else_clause" => {
+                builder.add_branch();
+            }
+            "for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "for_range_loop" => {
+                // C++ range-based for: for (auto x : container)
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "do_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "switch_statement" => {
+                builder.enter_scope();
+            }
+            "case_statement" => {
+                builder.add_branch();
+            }
+            "default_statement" => {
+                builder.add_branch();
+            }
+            "conditional_expression" => {
+                // Ternary operator ?:
+                builder.add_branch();
+            }
+            "catch_clause" => {
+                builder.add_exception_handler();
+            }
+            "binary_expression" => {
+                // Check for && and ||
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for control structures that entered one
+        match node.kind() {
+            "if_statement" | "for_statement" | "for_range_loop" | "while_statement"
+            | "do_statement" | "switch_statement" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -950,5 +1031,98 @@ mod tests {
         assert!(visitor.classes[0]
             .attributes
             .contains(&"enum_class".to_string()));
+    }
+
+    #[test]
+    fn test_complexity_simple_function() {
+        // A function with no control flow has CC=1
+        let source = b"int add(int a, int b) { return a + b; }";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+    }
+
+    #[test]
+    fn test_complexity_if_else_and_loop() {
+        // if + else + for = 2 branches + 1 loop => CC = 1 + 2 + 1 = 4
+        let source =
+            b"void process(int x) { if (x > 0) { for (int i = 0; i < x; i++) {} } else {} }";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.branches >= 2,
+            "expected >= 2 branches, got {}",
+            complexity.branches
+        );
+        assert!(
+            complexity.loops >= 1,
+            "expected >= 1 loop, got {}",
+            complexity.loops
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_complexity_nested_control_flow() {
+        // Nested if inside while, plus logical operator => higher nesting depth
+        let source = b"bool find(int* arr, int n, int val) { \
+            while (n > 0) { \
+                if (arr[n-1] == val || arr[0] == val) { return true; } \
+                n--; \
+            } \
+            return false; \
+        }";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(complexity.loops >= 1);
+        assert!(complexity.branches >= 1);
+        assert!(complexity.logical_operators >= 1);
+        assert!(complexity.max_nesting_depth >= 2);
+        assert!(complexity.cyclomatic_complexity > 2);
+    }
+
+    #[test]
+    fn test_complexity_range_based_for_and_catch() {
+        // C++-specific: range-based for and catch clause
+        let source = b"void run(std::vector<int>& v) { \
+            try { \
+                for (auto x : v) { if (x < 0) {} } \
+            } catch (...) {} \
+        }";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.loops >= 1,
+            "expected range-based for to count as a loop"
+        );
+        assert!(
+            complexity.exception_handlers >= 1,
+            "expected catch to count as exception handler"
+        );
+        assert!(complexity.branches >= 1);
+    }
+
+    #[test]
+    fn test_complexity_method() {
+        // Complexity is also captured for class methods
+        let source = b"class Foo { int bar(int x) { if (x > 0) { return x; } return 0; } };";
+        let visitor = parse_and_visit(source);
+
+        // bar is extracted as a function with parent_class = "Foo"
+        let bar = visitor.functions.iter().find(|f| f.name == "bar");
+        assert!(bar.is_some(), "method 'bar' not found");
+        let complexity = bar.unwrap().complexity.as_ref().unwrap();
+        assert!(complexity.branches >= 1);
+        assert!(complexity.cyclomatic_complexity > 1);
     }
 }

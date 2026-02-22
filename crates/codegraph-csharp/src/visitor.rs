@@ -1,8 +1,8 @@
 //! AST visitor for extracting C# entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -444,6 +444,11 @@ impl<'a> CSharpVisitor<'a> {
         let parameters = self.extract_parameters(node);
         let doc_comment = self.extract_doc_comment(node);
 
+        // Calculate complexity from method body (abstract/interface methods have no body)
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_method_signature(node),
@@ -459,7 +464,7 @@ impl<'a> CSharpVisitor<'a> {
             doc_comment,
             attributes: self.extract_attributes(node),
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -861,6 +866,87 @@ impl<'a> CSharpVisitor<'a> {
             name.to_string()
         }
     }
+
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+                // Check if there's an else branch: if_statement has two block children
+                // when an else clause is present (the anonymous `else` token + second block).
+                // We detect it by checking for the `else` keyword child.
+                let has_else = {
+                    let mut cursor = node.walk();
+                    let x = node.children(&mut cursor).any(|c| c.kind() == "else");
+                    x
+                };
+                if has_else {
+                    builder.add_branch();
+                }
+            }
+            // Each switch_section represents one case or default branch
+            "switch_section" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "conditional_expression" => {
+                // Ternary operator ?:
+                builder.add_branch();
+            }
+            "for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "do_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "foreach_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "binary_expression" => {
+                // Check for && and ||
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            "catch_clause" => {
+                builder.add_exception_handler();
+            }
+            "finally_clause" => {
+                builder.add_exception_handler();
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for control structures that entered one
+        match node.kind() {
+            "if_statement" | "for_statement" | "while_statement" | "do_statement"
+            | "foreach_statement" | "switch_section" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -965,6 +1051,21 @@ mod tests {
         let source2 = b"public class Container<T> { private T value; }";
         let tree2 = parser.parse(source2, None).unwrap();
         print_tree(source2, tree2.root_node(), 0);
+
+        println!("\n=== if/else ===");
+        let source3 = b"class C { void M() { if (x > 0) { } else { } } }";
+        let tree3 = parser.parse(source3, None).unwrap();
+        print_tree(source3, tree3.root_node(), 0);
+
+        println!("\n=== switch ===");
+        let source4 = b"class C { void M() { switch (n) { case 1: break; default: break; } } }";
+        let tree4 = parser.parse(source4, None).unwrap();
+        print_tree(source4, tree4.root_node(), 0);
+
+        println!("\n=== foreach ===");
+        let source5 = b"class C { void M() { foreach (var x in items) { } } }";
+        let tree5 = parser.parse(source5, None).unwrap();
+        print_tree(source5, tree5.root_node(), 0);
     }
 
     #[test]
@@ -1213,5 +1314,193 @@ public class Test
         assert_eq!(visitor.calls[0].callee, "Helper");
         assert_eq!(visitor.calls[0].call_site_line, 6);
         assert!(visitor.calls[0].is_direct);
+    }
+
+    #[test]
+    fn test_complexity_simple_function() {
+        // A function with no branches has CC=1
+        let source = b"
+public class MyClass
+{
+    public int SimpleAdd(int a, int b)
+    {
+        return a + b;
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+        assert_eq!(complexity.logical_operators, 0);
+    }
+
+    #[test]
+    fn test_complexity_if_else_and_loop() {
+        // if/else adds 2 branches, foreach adds 1 loop: CC = 1 + 2 + 1 = 4
+        let source = b"
+public class MyClass
+{
+    public string Classify(int[] items)
+    {
+        foreach (var item in items)
+        {
+            if (item > 0)
+            {
+                return \"positive\";
+            }
+            else
+            {
+                return \"non-positive\";
+            }
+        }
+        return \"empty\";
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // branches: if_statement + else_clause = 2, loops: for_each_statement = 1
+        assert!(
+            complexity.branches >= 2,
+            "expected branches >= 2, got {}",
+            complexity.branches
+        );
+        assert!(
+            complexity.loops >= 1,
+            "expected loops >= 1, got {}",
+            complexity.loops
+        );
+        assert!(
+            complexity.cyclomatic_complexity > 1,
+            "expected CC > 1, got {}",
+            complexity.cyclomatic_complexity
+        );
+        assert!(
+            complexity.max_nesting_depth >= 2,
+            "expected nesting >= 2, got {}",
+            complexity.max_nesting_depth
+        );
+    }
+
+    #[test]
+    fn test_complexity_try_catch_finally() {
+        // try/catch/finally: catch adds 1, finally adds 1 exception handler: CC = 1 + 2 = 3
+        let source = b"
+public class MyClass
+{
+    public void LoadData(string path)
+    {
+        try
+        {
+            var data = ReadFile(path);
+            Process(data);
+        }
+        catch (Exception ex)
+        {
+            Log(ex.Message);
+        }
+        finally
+        {
+            Cleanup();
+        }
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.exception_handlers >= 2,
+            "expected exception_handlers >= 2, got {}",
+            complexity.exception_handlers
+        );
+        assert!(
+            complexity.cyclomatic_complexity >= 3,
+            "expected CC >= 3, got {}",
+            complexity.cyclomatic_complexity
+        );
+    }
+
+    #[test]
+    fn test_complexity_logical_operators() {
+        // Two logical operators (&&, ||): CC = 1 + 1 (if) + 2 (logical) = 4
+        let source = b"
+public class MyClass
+{
+    public bool IsValid(int x, int y, int z)
+    {
+        if (x > 0 && y > 0 || z > 0)
+        {
+            return true;
+        }
+        return false;
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.logical_operators >= 2,
+            "expected logical_operators >= 2, got {}",
+            complexity.logical_operators
+        );
+    }
+
+    #[test]
+    fn test_complexity_switch() {
+        // switch with 3 cases (including default): CC = 1 + 3 = 4
+        let source = b"
+public class MyClass
+{
+    public string Describe(int n)
+    {
+        switch (n)
+        {
+            case 1:
+                return \"one\";
+            case 2:
+                return \"two\";
+            default:
+                return \"other\";
+        }
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.branches >= 3,
+            "expected branches >= 3 (case + case + default), got {}",
+            complexity.branches
+        );
+    }
+
+    #[test]
+    fn test_complexity_abstract_method_has_none() {
+        // Abstract methods have no body, so complexity should be None
+        let source = b"
+public abstract class MyClass
+{
+    public abstract void DoWork();
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert!(
+            visitor.functions[0].complexity.is_none(),
+            "abstract methods should have no complexity"
+        );
     }
 }

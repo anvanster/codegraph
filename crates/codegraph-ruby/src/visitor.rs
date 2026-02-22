@@ -869,8 +869,14 @@ end
         assert_eq!(visitor.functions.len(), 1);
         let complexity = visitor.functions[0].complexity.as_ref().unwrap();
         // do_block=1 loop, if=1 branch, elsif=1 branch, else=1 branch => CC = 1+1+3 = 5
-        assert!(complexity.loops >= 1, "expected at least 1 loop (each do block)");
-        assert!(complexity.branches >= 3, "expected if + elsif + else = 3 branches");
+        assert!(
+            complexity.loops >= 1,
+            "expected at least 1 loop (each do block)"
+        );
+        assert!(
+            complexity.branches >= 3,
+            "expected if + elsif + else = 3 branches"
+        );
         assert!(complexity.cyclomatic_complexity > 1);
     }
 

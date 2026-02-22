@@ -83,6 +83,25 @@ pub fn ir_to_graph(
             props = props.with("attributes", func.attributes.join(","));
         }
 
+        // Add complexity metrics if available
+        if let Some(ref complexity) = func.complexity {
+            props = props
+                .with("complexity", complexity.cyclomatic_complexity as i64)
+                .with("complexity_grade", complexity.grade().to_string())
+                .with("complexity_branches", complexity.branches as i64)
+                .with("complexity_loops", complexity.loops as i64)
+                .with(
+                    "complexity_logical_ops",
+                    complexity.logical_operators as i64,
+                )
+                .with("complexity_nesting", complexity.max_nesting_depth as i64)
+                .with(
+                    "complexity_exceptions",
+                    complexity.exception_handlers as i64,
+                )
+                .with("complexity_early_returns", complexity.early_returns as i64);
+        }
+
         let func_id = graph
             .add_node(NodeType::Function, props)
             .map_err(|e| ParserError::GraphError(e.to_string()))?;

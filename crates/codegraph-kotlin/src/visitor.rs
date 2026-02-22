@@ -1,8 +1,8 @@
 //! AST visitor for extracting Kotlin entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -470,6 +470,19 @@ impl<'a> KotlinVisitor<'a> {
             attributes.push("operator".to_string());
         }
 
+        // Calculate complexity from function body (find function_body as a direct child)
+        let complexity = {
+            let mut body_node = None;
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "function_body" {
+                    body_node = Some(child);
+                    break;
+                }
+            }
+            body_node.map(|body| self.calculate_complexity(body))
+        };
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_function_signature(node),
@@ -485,7 +498,7 @@ impl<'a> KotlinVisitor<'a> {
             doc_comment,
             attributes,
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -951,6 +964,84 @@ impl<'a> KotlinVisitor<'a> {
         false
     }
 
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_expression" => {
+                builder.add_branch();
+                builder.enter_scope();
+
+                // Check for an else branch by scanning children for the "else" keyword
+                let has_else = {
+                    let mut cursor = node.walk();
+                    let x = node
+                        .children(&mut cursor)
+                        .any(|child| child.kind() == "else");
+                    x
+                };
+                if has_else {
+                    builder.add_branch();
+                }
+            }
+            "when_expression" => {
+                builder.enter_scope();
+            }
+            "when_entry" => {
+                builder.add_branch();
+            }
+            "for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "do_while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "catch_block" => {
+                builder.add_exception_handler();
+            }
+            "finally_block" => {
+                builder.add_exception_handler();
+            }
+            "conjunction_expression" => {
+                // Kotlin && operator
+                builder.add_logical_operator();
+            }
+            "disjunction_expression" => {
+                // Kotlin || operator
+                builder.add_logical_operator();
+            }
+            "elvis_expression" => {
+                // Kotlin ?: (null-coalescing) acts as a branch
+                builder.add_branch();
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for control structures that entered one
+        match node.kind() {
+            "if_expression" | "when_expression" | "for_statement" | "while_statement"
+            | "do_while_statement" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
+
     fn qualify_name(&self, name: &str) -> String {
         if let Some(ref pkg) = self.current_package {
             format!("{}.{}", pkg, name)
@@ -1161,5 +1252,171 @@ class Test {
 
         assert_eq!(visitor.classes.len(), 1);
         assert!(!visitor.classes[0].type_parameters.is_empty());
+    }
+
+    #[test]
+    fn test_complexity_simple_function() {
+        // A function with no branching should have CC=1
+        let source = b"fun greet(name: String): String { return \"Hello, $name!\" }";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+    }
+
+    #[test]
+    fn test_complexity_if_else_and_loop() {
+        // A function with if/else and a for loop should have CC > 1
+        let source = b"
+fun classify(x: Int): String {
+    val result = if (x > 0) {
+        \"positive\"
+    } else {
+        \"non-positive\"
+    }
+    for (i in 0..x) {
+        println(i)
+    }
+    return result
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // if adds 1 branch, else adds 1 branch, for adds 1 loop: CC = 1 + 1 + 1 + 1 = 4
+        assert!(
+            complexity.branches >= 2,
+            "Expected at least 2 branches, got {}",
+            complexity.branches
+        );
+        assert!(
+            complexity.loops >= 1,
+            "Expected at least 1 loop, got {}",
+            complexity.loops
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_complexity_when_expression() {
+        // A function with a when expression should count each when_entry as a branch
+        let source = b"
+fun describe(x: Int): String {
+    return when (x) {
+        1 -> \"one\"
+        2 -> \"two\"
+        3 -> \"three\"
+        else -> \"other\"
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // 4 when_entry nodes (1, 2, 3, else): 4 branches total
+        assert!(
+            complexity.branches >= 4,
+            "Expected at least 4 branches for when entries, got {}",
+            complexity.branches
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_complexity_logical_operators() {
+        // Logical && and || operators should increase complexity
+        let source = b"
+fun check(a: Int, b: Int, c: Int): Boolean {
+    return a > 0 && b > 0 || c == 0
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // disjunction (||) wraps conjunction (&&): 2 logical operators
+        assert!(
+            complexity.logical_operators >= 2,
+            "Expected at least 2 logical operators, got {}",
+            complexity.logical_operators
+        );
+    }
+
+    #[test]
+    fn test_complexity_exception_handling() {
+        // catch and finally blocks should increase exception_handlers count
+        let source = b"
+fun riskyOp() {
+    try {
+        println(\"try\")
+    } catch (e: Exception) {
+        println(\"catch\")
+    } finally {
+        println(\"finally\")
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // 1 catch_block + 1 finally_block = 2 exception handlers
+        assert!(
+            complexity.exception_handlers >= 2,
+            "Expected at least 2 exception handlers, got {}",
+            complexity.exception_handlers
+        );
+    }
+
+    #[test]
+    fn test_complexity_while_and_do_while() {
+        // while and do-while loops add to loop count
+        let source = b"
+fun loops(n: Int) {
+    var i = 0
+    while (i < n) { i++ }
+    do { i-- } while (i > 0)
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.loops >= 2,
+            "Expected at least 2 loops, got {}",
+            complexity.loops
+        );
+    }
+
+    #[test]
+    fn test_complexity_nesting_depth() {
+        // Nested control structures should track max nesting depth
+        let source = b"
+fun nested(x: Int, y: Int) {
+    if (x > 0) {
+        for (i in 0..x) {
+            while (y > 0) {
+                println(i)
+            }
+        }
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert!(!visitor.functions.is_empty());
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // if -> for -> while: nesting depth of 3
+        assert!(
+            complexity.max_nesting_depth >= 3,
+            "Expected nesting depth >= 3, got {}",
+            complexity.max_nesting_depth
+        );
     }
 }

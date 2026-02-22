@@ -1,7 +1,8 @@
 //! AST visitor for extracting Go entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImportRelation, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImportRelation, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -65,6 +66,10 @@ impl<'a> GoVisitor<'a> {
         let previous_function = self.current_function.clone();
         self.current_function = Some(name.clone());
 
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name,
             signature: self
@@ -85,7 +90,7 @@ impl<'a> GoVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -106,6 +111,10 @@ impl<'a> GoVisitor<'a> {
         let previous_function = self.current_function.clone();
         self.current_function = Some(name.clone());
 
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name,
             signature: self
@@ -126,7 +135,7 @@ impl<'a> GoVisitor<'a> {
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -136,6 +145,78 @@ impl<'a> GoVisitor<'a> {
         }
 
         self.current_function = previous_function;
+    }
+
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+                // Count an `else` branch if this if_statement has one.
+                // tree-sitter-go has no `else_clause` wrapper: the else branch
+                // appears as a bare `else` keyword token followed by a sibling block.
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "else" {
+                        builder.add_branch();
+                    }
+                }
+            }
+            "for_statement" => {
+                // Go only has `for` — covers for, while-style, and range loops
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "expression_switch_statement" | "type_switch_statement" => {
+                builder.enter_scope();
+            }
+            "expression_case" | "default_case" | "type_case" => {
+                builder.add_branch();
+            }
+            "select_statement" => {
+                builder.enter_scope();
+            }
+            "communication_case" => {
+                // select { case <-ch: ... }
+                builder.add_branch();
+            }
+            "defer_statement" => {
+                // Go uses defer/recover instead of try/catch
+                builder.add_exception_handler();
+            }
+            "binary_expression" => {
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope after visiting children
+        match node.kind() {
+            "if_statement"
+            | "for_statement"
+            | "expression_switch_statement"
+            | "type_switch_statement"
+            | "select_statement" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
     }
 
     /// Visit a call expression and record the caller→callee relationship
@@ -601,5 +682,117 @@ mod tests {
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.calls.len(), 0);
+    }
+
+    #[test]
+    fn test_complexity_simple_function() {
+        use tree_sitter::Parser;
+
+        // A function with no branches — CC should be 1
+        let source = b"package main\nfunc simple(x int) int { return x + 1 }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(
+            complexity.cyclomatic_complexity, 1,
+            "Simple function should have CC=1"
+        );
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+    }
+
+    #[test]
+    fn test_complexity_if_else_and_for() {
+        use tree_sitter::Parser;
+
+        // if adds 1 branch, else adds 1 branch, for adds 1 loop → CC = 1 + 3 = 4
+        let source = b"package main\nfunc process(n int) int {\n\tif n > 0 {\n\t\treturn n\n\t} else {\n\t\treturn -n\n\t}\n\tfor i := 0; i < n; i++ {}\n\treturn 0\n}";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.branches >= 2,
+            "if + else should contribute >= 2 branches"
+        );
+        assert!(
+            complexity.loops >= 1,
+            "for loop should contribute >= 1 loop"
+        );
+        assert!(complexity.cyclomatic_complexity > 1, "CC should be > 1");
+    }
+
+    #[test]
+    fn test_complexity_switch_and_select() {
+        use tree_sitter::Parser;
+
+        // switch with 2 cases + default → 3 branches; select with 2 cases → 2 more branches
+        let source = br#"package main
+func handle(x int, ch chan int) {
+    switch x {
+    case 1:
+        return
+    case 2:
+        return
+    default:
+        return
+    }
+    select {
+    case v := <-ch:
+        _ = v
+    default:
+        return
+    }
+}"#;
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // switch: case 1, case 2, default → 3 branches
+        // select: communication_case, default_case → 2 branches
+        assert!(
+            complexity.branches >= 5,
+            "switch (3) + select (2) should contribute >= 5 branches, got {}",
+            complexity.branches
+        );
+        assert!(complexity.cyclomatic_complexity > 1, "CC should be > 1");
+    }
+
+    #[test]
+    fn test_complexity_logical_operators() {
+        use tree_sitter::Parser;
+
+        // && and || each add a logical operator count
+        let source = b"package main\nfunc check(a, b, c bool) bool { return a && b || c }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.logical_operators >= 2,
+            "&& and || should each count, got {}",
+            complexity.logical_operators
+        );
     }
 }

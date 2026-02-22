@@ -1,8 +1,8 @@
 //! AST visitor for extracting Java entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -410,6 +410,10 @@ impl<'a> JavaVisitor<'a> {
         let parameters = self.extract_parameters(node);
         let doc_comment = self.extract_doc_comment(node);
 
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_method_signature(node),
@@ -425,7 +429,7 @@ impl<'a> JavaVisitor<'a> {
             doc_comment,
             attributes: self.extract_annotations(node),
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -766,6 +770,90 @@ impl<'a> JavaVisitor<'a> {
         false
     }
 
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+                // Count the else branch: the Java grammar emits a bare `else`
+                // keyword token as a direct child of if_statement (no else_clause
+                // wrapper node), so we look for it here.
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "else" {
+                        builder.add_branch();
+                        break;
+                    }
+                }
+            }
+            "for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "enhanced_for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "do_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "switch_expression" => {
+                builder.enter_scope();
+            }
+            "switch_label" => {
+                // Covers both `case X:` and `default:` labels
+                builder.add_branch();
+            }
+            "ternary_expression" => {
+                builder.add_branch();
+            }
+            "catch_clause" => {
+                builder.add_exception_handler();
+            }
+            "finally_clause" => {
+                builder.add_exception_handler();
+            }
+            "binary_expression" => {
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for constructs that entered one
+        match node.kind() {
+            "if_statement"
+            | "for_statement"
+            | "enhanced_for_statement"
+            | "while_statement"
+            | "do_statement"
+            | "switch_expression" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
+
     fn qualify_name(&self, name: &str) -> String {
         if let Some(ref pkg) = self.current_package {
             format!("{}.{}", pkg, name)
@@ -1069,5 +1157,85 @@ public class Test {
         assert_eq!(visitor.calls[0].callee, "helper");
         assert_eq!(visitor.calls[0].call_site_line, 4);
         assert!(visitor.calls[0].is_direct);
+    }
+
+    #[test]
+    fn test_visitor_complexity_simple_method() {
+        // A method with no branches has CC=1
+        let source = b"
+public class Calc {
+    public int add(int a, int b) { return a + b; }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+    }
+
+    #[test]
+    fn test_visitor_complexity_if_else_and_loop() {
+        // if + else = 2 branches, for = 1 loop  =>  CC = 1 + 2 + 1 = 4
+        let source = b"
+public class Checker {
+    public String classify(int[] nums) {
+        String result = \"\";
+        for (int n : nums) {
+            if (n > 0) {
+                result = \"positive\";
+            } else {
+                result = \"non-positive\";
+            }
+        }
+        return result;
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.branches >= 2,
+            "expected >= 2 branches, got {}",
+            complexity.branches
+        );
+        assert!(
+            complexity.loops >= 1,
+            "expected >= 1 loop, got {}",
+            complexity.loops
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_visitor_complexity_try_catch_finally() {
+        // catch + finally each add an exception handler  =>  CC = 1 + 2 = 3
+        let source = b"
+public class Resource {
+    public void load(String path) {
+        try {
+            System.out.println(path);
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            System.out.println(\"done\");
+        }
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.exception_handlers >= 2,
+            "expected >= 2 exception handlers (catch + finally), got {}",
+            complexity.exception_handlers
+        );
+        assert!(complexity.cyclomatic_complexity >= 3);
     }
 }

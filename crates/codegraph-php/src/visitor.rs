@@ -1,8 +1,8 @@
 //! AST visitor for extracting PHP entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -119,6 +119,11 @@ impl<'a> PhpVisitor<'a> {
 
         let qualified_name = self.qualify_name(&name);
 
+        // Calculate complexity from function body
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: qualified_name.clone(),
             signature: self.extract_function_signature(node),
@@ -134,7 +139,7 @@ impl<'a> PhpVisitor<'a> {
             doc_comment,
             attributes: Vec::new(),
             parent_class: None,
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -161,6 +166,11 @@ impl<'a> PhpVisitor<'a> {
         let parameters = self.extract_parameters(node);
         let doc_comment = self.extract_doc_comment(node);
 
+        // Calculate complexity from method body
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_function_signature(node),
@@ -176,7 +186,7 @@ impl<'a> PhpVisitor<'a> {
             doc_comment,
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -921,6 +931,94 @@ impl<'a> PhpVisitor<'a> {
         None
     }
 
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "else_if_clause" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "else_clause" => {
+                builder.add_branch();
+            }
+            "switch_statement" => {
+                builder.enter_scope();
+            }
+            "switch_case" | "case_statement" => {
+                builder.add_branch();
+            }
+            "switch_default_case" | "default_statement" => {
+                builder.add_branch();
+            }
+            "conditional_expression" => {
+                // Ternary operator ?:
+                builder.add_branch();
+            }
+            "match_conditional_expression" => {
+                // PHP 8.0 match expression arm
+                builder.add_branch();
+            }
+            "for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "do_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "foreach_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "binary_expression" => {
+                // Check for &&, ||, and, or operators
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" || op_text == "and" || op_text == "or" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            "catch_clause" => {
+                builder.add_exception_handler();
+                builder.enter_scope();
+            }
+            "finally_clause" => {
+                builder.add_exception_handler();
+                builder.enter_scope();
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for control structures
+        match node.kind() {
+            "if_statement" | "else_if_clause" | "for_statement" | "while_statement"
+            | "do_statement" | "foreach_statement" | "switch_statement" | "catch_clause"
+            | "finally_clause" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
+
     fn qualify_name(&self, name: &str) -> String {
         if let Some(ref ns) = self.current_namespace {
             format!("{}\\{}", ns, name)
@@ -1402,5 +1500,86 @@ include 'helpers.php';
         assert_eq!(visitor.imports.len(), 1);
         assert_eq!(visitor.imports[0].imported, "./config.php");
         assert!(!visitor.imports[0].is_wildcard);
+    }
+
+    // --- Complexity tests ---
+
+    #[test]
+    fn test_visitor_complexity_simple_function() {
+        // A simple function with no branches: CC = 1
+        let source = b"<?php\nfunction hello(): string { return 'hello'; }";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+        assert_eq!(complexity.logical_operators, 0);
+    }
+
+    #[test]
+    fn test_visitor_complexity_if_elseif_else_foreach() {
+        // Function with if/elseif/else and foreach: CC > 1
+        let source = b"<?php
+function categorize(array $items): string {
+    $result = '';
+    if (count($items) === 0) {
+        $result = 'empty';
+    } elseif (count($items) < 5) {
+        foreach ($items as $item) {
+            $result .= $item;
+        }
+    } else {
+        $result = 'large';
+    }
+    return $result;
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // if + elseif + else = 3 branches, foreach = 1 loop => CC = 1 + 3 + 1 = 5
+        assert!(
+            complexity.branches >= 3,
+            "Expected at least 3 branches, got {}",
+            complexity.branches
+        );
+        assert!(
+            complexity.loops >= 1,
+            "Expected at least 1 loop, got {}",
+            complexity.loops
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_visitor_complexity_try_catch() {
+        // Function with try/catch: exception_handlers should be counted
+        let source = b"<?php
+function loadFile(string $path): string {
+    try {
+        $content = file_get_contents($path);
+        if ($content === false) {
+            throw new RuntimeException('Cannot read file');
+        }
+        return $content;
+    } catch (RuntimeException $e) {
+        return '';
+    }
+}
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // catch_clause = 1 exception_handler, if_statement = 1 branch => CC = 1 + 1 + 1 = 3
+        assert!(
+            complexity.exception_handlers >= 1,
+            "Expected at least 1 exception handler, got {}",
+            complexity.exception_handlers
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
     }
 }

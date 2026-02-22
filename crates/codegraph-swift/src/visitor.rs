@@ -1,8 +1,8 @@
 //! AST visitor for extracting Swift entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -278,6 +278,9 @@ impl<'a> SwiftVisitor<'a> {
         let is_async = self.has_modifier(node, "async");
         let doc_comment = self.extract_doc_comment(node);
 
+        // Calculate complexity from function body
+        let complexity = self.find_body_and_calculate_complexity(node);
+
         let mut func = FunctionEntity::new(
             &name,
             node.start_position().row + 1,
@@ -292,6 +295,7 @@ impl<'a> SwiftVisitor<'a> {
         func.is_async = is_async;
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
+        func.complexity = complexity;
 
         self.functions.push(func);
 
@@ -324,6 +328,9 @@ impl<'a> SwiftVisitor<'a> {
         let is_async = self.has_modifier(node, "async");
         let doc_comment = self.extract_doc_comment(node);
 
+        // Calculate complexity from method body
+        let complexity = self.find_body_and_calculate_complexity(node);
+
         let mut func = FunctionEntity::new(
             &name,
             node.start_position().row + 1,
@@ -338,6 +345,7 @@ impl<'a> SwiftVisitor<'a> {
         func.is_async = is_async;
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
+        func.complexity = complexity;
 
         if self.has_modifier(node, "override") {
             func.attributes.push("override".to_string());
@@ -370,6 +378,9 @@ impl<'a> SwiftVisitor<'a> {
         let visibility = self.extract_visibility(node);
         let doc_comment = self.extract_doc_comment(node);
 
+        // Calculate complexity from init body
+        let complexity = self.find_body_and_calculate_complexity(node);
+
         let mut func = FunctionEntity::new(
             &name,
             node.start_position().row + 1,
@@ -381,6 +392,7 @@ impl<'a> SwiftVisitor<'a> {
         func.parameters = params;
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
+        func.complexity = complexity;
         func.attributes.push("init".to_string());
 
         if self.has_modifier(node, "convenience") {
@@ -839,6 +851,90 @@ impl<'a> SwiftVisitor<'a> {
         false
     }
 
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    /// Find the function body child node and calculate complexity from it.
+    /// Returns None if no body node is found (e.g., abstract/protocol declarations).
+    fn find_body_and_calculate_complexity(&self, node: Node) -> Option<ComplexityMetrics> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "function_body" || child.kind() == "code_block" {
+                return Some(self.calculate_complexity(child));
+            }
+        }
+        None
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if_statement" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "for_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "repeat_while_statement" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "switch_statement" => {
+                builder.enter_scope();
+            }
+            "switch_entry" => {
+                // Each case (including default) is a branch
+                builder.add_branch();
+            }
+            "guard_statement" => {
+                // guard adds a branch (the else path)
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "ternary_expression" => {
+                builder.add_branch();
+            }
+            "conjunction_expression" => {
+                // a && b
+                builder.add_logical_operator();
+            }
+            "disjunction_expression" => {
+                // a || b
+                builder.add_logical_operator();
+            }
+            "catch_block" => {
+                builder.add_exception_handler();
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for control structures that opened one
+        match node.kind() {
+            "if_statement"
+            | "for_statement"
+            | "while_statement"
+            | "repeat_while_statement"
+            | "switch_statement"
+            | "guard_statement" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
+
     fn extract_doc_comment(&self, node: Node) -> Option<String> {
         if let Some(prev) = node.prev_sibling() {
             if prev.kind() == "comment" || prev.kind() == "multiline_comment" {
@@ -941,5 +1037,221 @@ mod tests {
         assert_eq!(visitor.classes.len(), 1);
         assert_eq!(visitor.classes[0].name, "Color");
         assert!(visitor.classes[0].attributes.contains(&"enum".to_string()));
+    }
+
+    // Complexity tests
+
+    #[test]
+    fn test_complexity_simple_function() {
+        // A function with no control flow has CC=1
+        let source = b"func simple(x: Int) -> Int { return x + 1 }";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+        assert_eq!(complexity.logical_operators, 0);
+    }
+
+    #[test]
+    fn test_complexity_if_else_and_for_in_loop() {
+        // if + else-if + else + for-in loop: branches=2, loops=1 => CC=1+2+1=4
+        let source = br#"
+func process(x: Int) {
+    if x > 0 {
+        print("positive")
+    } else if x < 0 {
+        print("negative")
+    } else {
+        print("zero")
+    }
+    for i in 0..<x {
+        print(i)
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // Two if_statement nodes (if x>0 and else-if x<0), one for_statement
+        assert!(
+            complexity.branches >= 2,
+            "Expected >= 2 branches, got {}",
+            complexity.branches
+        );
+        assert!(
+            complexity.loops >= 1,
+            "Expected >= 1 loop, got {}",
+            complexity.loops
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_complexity_guard_and_switch() {
+        // guard (branch) + switch with 3 entries (3 branches) => branches=4, CC=5
+        let source = br#"
+func classify(x: Int?) -> String {
+    guard let val = x else { return "nil" }
+    switch val {
+    case 1:
+        return "one"
+    case 2:
+        return "two"
+    default:
+        return "other"
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // 1 guard + 3 switch_entry nodes
+        assert!(
+            complexity.branches >= 4,
+            "Expected >= 4 branches, got {}",
+            complexity.branches
+        );
+        assert!(complexity.cyclomatic_complexity >= 5);
+    }
+
+    #[test]
+    fn test_complexity_logical_operators() {
+        // a && b counts as conjunction_expression, a || b as disjunction_expression
+        let source = br#"
+func check(a: Bool, b: Bool, c: Bool) -> Bool {
+    return a && b || c
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.logical_operators >= 2,
+            "Expected >= 2 logical operators, got {}",
+            complexity.logical_operators
+        );
+    }
+
+    #[test]
+    fn test_complexity_catch_block() {
+        // A do-catch adds one exception_handler
+        let source = br#"
+func risky() {
+    do {
+        print("try")
+    } catch {
+        print("error")
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.exception_handlers >= 1,
+            "Expected >= 1 exception handler, got {}",
+            complexity.exception_handlers
+        );
+    }
+
+    #[test]
+    fn test_complexity_ternary() {
+        // A ternary expression adds a branch
+        let source = br#"
+func sign(x: Int) -> String {
+    return x > 0 ? "positive" : "non-positive"
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.branches >= 1,
+            "Expected >= 1 branch from ternary, got {}",
+            complexity.branches
+        );
+    }
+
+    #[test]
+    fn test_complexity_repeat_while() {
+        // repeat-while adds a loop
+        let source = br#"
+func countDown() {
+    var x = 10
+    repeat {
+        x -= 1
+    } while x > 0
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.loops >= 1,
+            "Expected >= 1 loop from repeat-while, got {}",
+            complexity.loops
+        );
+    }
+
+    #[test]
+    fn test_complexity_nesting_depth() {
+        // Nested if inside for inside if => depth >= 3
+        let source = br#"
+func nested(x: Int) {
+    if x > 0 {
+        for i in 0..<x {
+            if i % 2 == 0 {
+                print(i)
+            }
+        }
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert!(
+            complexity.max_nesting_depth >= 3,
+            "Expected nesting depth >= 3, got {}",
+            complexity.max_nesting_depth
+        );
+    }
+
+    #[test]
+    fn test_complexity_method_in_class() {
+        // Methods in a class also get complexity scored
+        let source = br#"
+class Calculator {
+    func compute(x: Int, y: Int) -> Int {
+        if x > y {
+            return x - y
+        } else {
+            return y - x
+        }
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+
+        // The method should be extracted with complexity
+        let method = visitor.functions.iter().find(|f| f.name == "compute");
+        assert!(method.is_some(), "compute method not found");
+        let complexity = method.unwrap().complexity.as_ref().unwrap();
+        assert!(
+            complexity.branches >= 1,
+            "Expected >= 1 branch, got {}",
+            complexity.branches
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
     }
 }
