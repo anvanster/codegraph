@@ -4,8 +4,9 @@
 //! and extracts functions, structs, enums, traits, and their relationships.
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, Field, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, ParserConfig, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, Field, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, ParserConfig,
+    TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -285,6 +286,11 @@ impl<'a> RustVisitor<'a> {
             return;
         }
 
+        // Calculate complexity from function body
+        let complexity = node
+            .child_by_field_name("body")
+            .map(|body| self.calculate_complexity(body));
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_signature(node),
@@ -300,7 +306,7 @@ impl<'a> RustVisitor<'a> {
             doc_comment: self.extract_doc_comment(node),
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -530,6 +536,11 @@ impl<'a> RustVisitor<'a> {
                     // Check if it's a static method (no self parameter)
                     let is_static = !parameters.iter().any(|p| p.name == "self");
 
+                    // Calculate complexity from method body
+                    let complexity = child
+                        .child_by_field_name("body")
+                        .map(|body| self.calculate_complexity(body));
+
                     let func = FunctionEntity {
                         name: method_name.clone(),
                         signature: self.extract_signature(child),
@@ -545,7 +556,7 @@ impl<'a> RustVisitor<'a> {
                         doc_comment: self.extract_doc_comment(child),
                         attributes: Vec::new(),
                         parent_class: Some(implementor.clone()),
-                        complexity: None,
+                        complexity,
                     };
 
                     self.functions.push(func);
@@ -627,6 +638,85 @@ impl<'a> RustVisitor<'a> {
             }
         } else {
             String::new()
+        }
+    }
+
+    /// Calculate cyclomatic complexity for a function body
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    /// Recursively walk AST counting complexity-contributing nodes
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            // Branches
+            "if_expression" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "else_clause" => {
+                builder.add_branch();
+            }
+            // Match expression (each arm is a decision path)
+            "match_expression" => {
+                builder.enter_scope();
+            }
+            "match_arm" => {
+                builder.add_branch();
+            }
+            // Loops
+            "loop_expression" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while_expression" | "while_let_expression" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "for_expression" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            // Logical operators (&& / ||)
+            "binary_expression" => {
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            // ? operator (early return on error)
+            "try_expression" => {
+                builder.add_early_return();
+            }
+            // Closures add a scope level
+            "closure_expression" => {
+                builder.enter_scope();
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for control structures
+        match node.kind() {
+            "if_expression"
+            | "match_expression"
+            | "loop_expression"
+            | "while_expression"
+            | "while_let_expression"
+            | "for_expression"
+            | "closure_expression" => {
+                builder.exit_scope();
+            }
+            _ => {}
         }
     }
 
@@ -1009,5 +1099,175 @@ fn standalone() {}
             0,
             "No calls outside of function bodies"
         );
+    }
+
+    // --- Complexity tests ---
+
+    #[test]
+    fn test_complexity_simple_function() {
+        let source = r#"
+fn simple() {
+    println!("hello");
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().expect("complexity should be set");
+        // No branches, loops, or logical ops → CC = 1
+        assert_eq!(cx.cyclomatic_complexity, 1);
+        assert_eq!(cx.grade(), 'A');
+    }
+
+    #[test]
+    fn test_complexity_if_else() {
+        let source = r#"
+fn check(x: i32) -> &'static str {
+    if x > 0 {
+        "positive"
+    } else if x < 0 {
+        "negative"
+    } else {
+        "zero"
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().unwrap();
+        // if (+1) + else_clause with if (+1 for else, +1 for nested if) + else (+1) = 4 branches
+        // CC = 1 + 4 = 5
+        assert!(
+            cx.cyclomatic_complexity >= 4,
+            "if/else if/else should have CC >= 4, got {}",
+            cx.cyclomatic_complexity
+        );
+        assert_eq!(cx.grade(), 'A');
+    }
+
+    #[test]
+    fn test_complexity_match() {
+        let source = r#"
+fn classify(x: i32) -> &'static str {
+    match x {
+        0 => "zero",
+        1..=10 => "small",
+        11..=100 => "medium",
+        _ => "large",
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().unwrap();
+        // 4 match arms → CC = 1 + 4 = 5
+        assert_eq!(cx.branches, 4);
+        assert_eq!(cx.cyclomatic_complexity, 5);
+    }
+
+    #[test]
+    fn test_complexity_loops() {
+        let source = r#"
+fn process(items: &[i32]) {
+    for item in items {
+        println!("{}", item);
+    }
+    let mut i = 0;
+    while i < 10 {
+        i += 1;
+    }
+    loop {
+        break;
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().unwrap();
+        // 3 loops → CC = 1 + 3 = 4
+        assert_eq!(cx.loops, 3);
+        assert_eq!(cx.cyclomatic_complexity, 4);
+    }
+
+    #[test]
+    fn test_complexity_logical_operators() {
+        let source = r#"
+fn validate(x: i32, y: i32) -> bool {
+    x > 0 && y > 0 || x < 100
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().unwrap();
+        // && and || → 2 logical operators, CC = 1 + 2 = 3
+        assert_eq!(cx.logical_operators, 2);
+        assert_eq!(cx.cyclomatic_complexity, 3);
+    }
+
+    #[test]
+    fn test_complexity_try_operator() {
+        let source = r#"
+fn read_file(path: &str) -> Result<String, std::io::Error> {
+    let content = std::fs::read_to_string(path)?;
+    let trimmed = content.trim().parse::<i32>()?;
+    Ok(trimmed.to_string())
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().unwrap();
+        // 2 ? operators → 2 early returns, CC = 1 (? counted as early_returns, not in CC formula)
+        assert_eq!(cx.early_returns, 2);
+    }
+
+    #[test]
+    fn test_complexity_nested() {
+        let source = r#"
+fn nested(items: &[i32]) {
+    for item in items {
+        if *item > 0 {
+            match item {
+                1 => {},
+                _ => {},
+            }
+        }
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let func = &visitor.functions[0];
+        let cx = func.complexity.as_ref().unwrap();
+        // for(+1 loop) + if(+1 branch) + 2 match arms(+2 branches) = CC = 1+1+1+2 = 5
+        assert_eq!(cx.max_nesting_depth, 3, "for > if > match = 3 levels");
+        assert!(cx.cyclomatic_complexity >= 4);
+    }
+
+    #[test]
+    fn test_complexity_impl_method() {
+        let source = r#"
+struct Foo;
+
+impl Foo {
+    fn complex_method(&self, x: i32) -> i32 {
+        if x > 0 {
+            for i in 0..x {
+                if i % 2 == 0 && i > 5 {
+                    return i;
+                }
+            }
+        }
+        0
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let method = visitor
+            .functions
+            .iter()
+            .find(|f| f.name == "complex_method")
+            .expect("method should exist");
+        let cx = method.complexity.as_ref().unwrap();
+        // if(+1) + for(+1) + if(+1) + &&(+1) = CC = 1+4 = 5
+        assert!(cx.cyclomatic_complexity >= 4);
+        assert!(cx.max_nesting_depth >= 3);
     }
 }
