@@ -1,8 +1,8 @@
 //! AST visitor for extracting Ruby entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, FunctionEntity, ImplementationRelation, ImportRelation,
-    InheritanceRelation, Parameter, TraitEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -90,6 +90,19 @@ impl<'a> RubyVisitor<'a> {
         // Determine visibility based on context
         let visibility = "public".to_string(); // Default in Ruby
 
+        // Calculate complexity from method body
+        let complexity = {
+            let mut body_node = None;
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "body_statement" {
+                    body_node = Some(child);
+                    break;
+                }
+            }
+            body_node.map(|body| self.calculate_complexity(body))
+        };
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_method_signature(node),
@@ -105,7 +118,7 @@ impl<'a> RubyVisitor<'a> {
             doc_comment,
             attributes: Vec::new(),
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -136,6 +149,19 @@ impl<'a> RubyVisitor<'a> {
         let parameters = self.extract_parameters(node);
         let doc_comment = self.extract_doc_comment(node);
 
+        // Calculate complexity from method body
+        let complexity = {
+            let mut body_node = None;
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "body_statement" {
+                    body_node = Some(child);
+                    break;
+                }
+            }
+            body_node.map(|body| self.calculate_complexity(body))
+        };
+
         let func = FunctionEntity {
             name: name.clone(),
             signature: self.extract_method_signature(node),
@@ -151,7 +177,7 @@ impl<'a> RubyVisitor<'a> {
             doc_comment,
             attributes: vec!["singleton".to_string()],
             parent_class: self.current_class.clone(),
-            complexity: None,
+            complexity,
         };
 
         self.functions.push(func);
@@ -531,6 +557,80 @@ impl<'a> RubyVisitor<'a> {
         name.starts_with("test_") || name.starts_with("it_") || name.starts_with("should_")
     }
 
+    fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
+        let mut builder = ComplexityBuilder::new();
+        self.visit_for_complexity(body, &mut builder);
+        builder.build()
+    }
+
+    fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
+        match node.kind() {
+            "if" | "unless" => {
+                builder.add_branch();
+                builder.enter_scope();
+            }
+            "elsif" => {
+                builder.add_branch();
+                // elsif does not create an additional scope level on top of its parent if
+            }
+            "else" => {
+                builder.add_branch();
+            }
+            "case" => {
+                builder.enter_scope();
+            }
+            "when" => {
+                builder.add_branch();
+            }
+            "conditional" => {
+                // Ternary: cond ? a : b
+                builder.add_branch();
+            }
+            "for" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "while" | "until" => {
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "do_block" | "block" => {
+                // Blocks passed to iterators (each, map, select, etc.)
+                builder.add_loop();
+                builder.enter_scope();
+            }
+            "rescue" => {
+                builder.add_exception_handler();
+            }
+            "ensure" => {
+                builder.add_exception_handler();
+            }
+            "binary" => {
+                // Check for && || and or
+                if let Some(op) = node.child_by_field_name("operator") {
+                    let op_text = self.node_text(op);
+                    if op_text == "&&" || op_text == "||" || op_text == "and" || op_text == "or" {
+                        builder.add_logical_operator();
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_for_complexity(child, builder);
+        }
+
+        // Exit scope for constructs that entered one
+        match node.kind() {
+            "if" | "unless" | "for" | "while" | "until" | "case" | "do_block" | "block" => {
+                builder.exit_scope();
+            }
+            _ => {}
+        }
+    }
+
     fn qualify_name(&self, name: &str) -> String {
         if let Some(ref module) = self.current_module {
             format!("{}::{}", module, name)
@@ -733,5 +833,72 @@ end
         assert_eq!(visitor.traits.len(), 2);
         assert!(visitor.traits.iter().any(|t| t.name == "Outer"));
         assert!(visitor.traits.iter().any(|t| t.name == "Outer::Inner"));
+    }
+
+    #[test]
+    fn test_complexity_simple_method() {
+        // A method with no control flow has CC=1
+        let source = b"def greet(name)\n  \"Hello, #{name}\"\nend";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        assert_eq!(complexity.cyclomatic_complexity, 1);
+        assert_eq!(complexity.branches, 0);
+        assert_eq!(complexity.loops, 0);
+        assert_eq!(complexity.logical_operators, 0);
+    }
+
+    #[test]
+    fn test_complexity_if_elsif_and_each() {
+        let source = b"
+def classify(items)
+  items.each do |item|
+    if item > 10
+      :big
+    elsif item > 5
+      :medium
+    else
+      :small
+    end
+  end
+end
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // do_block=1 loop, if=1 branch, elsif=1 branch, else=1 branch => CC = 1+1+3 = 5
+        assert!(complexity.loops >= 1, "expected at least 1 loop (each do block)");
+        assert!(complexity.branches >= 3, "expected if + elsif + else = 3 branches");
+        assert!(complexity.cyclomatic_complexity > 1);
+    }
+
+    #[test]
+    fn test_complexity_rescue_ensure() {
+        let source = b"
+def risky_operation
+  begin
+    do_something
+  rescue ArgumentError => e
+    handle_arg_error(e)
+  rescue => e
+    handle_generic(e)
+  ensure
+    cleanup
+  end
+end
+";
+        let visitor = parse_and_visit(source);
+
+        assert_eq!(visitor.functions.len(), 1);
+        let complexity = visitor.functions[0].complexity.as_ref().unwrap();
+        // 2 rescue + 1 ensure = 3 exception handlers => CC = 1+3 = 4
+        assert!(
+            complexity.exception_handlers >= 3,
+            "expected rescue + rescue + ensure = 3 exception handlers, got {}",
+            complexity.exception_handlers
+        );
+        assert!(complexity.cyclomatic_complexity > 1);
     }
 }
