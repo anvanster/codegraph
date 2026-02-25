@@ -503,3 +503,84 @@ fn use_constants() -> usize {
     let info = result.unwrap();
     assert_eq!(info.functions.len(), 1); // use_constants
 }
+
+#[test]
+fn test_calls_edges_same_file() {
+    use codegraph::{Direction, EdgeType};
+
+    let source = r#"
+struct Foo;
+
+impl Foo {
+    fn caller(&self) {
+        Self::associated();
+        self.instance_method();
+        standalone();
+    }
+    fn associated() {}
+    fn instance_method(&self) {}
+}
+
+fn standalone() {}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = RustParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.rs"), &mut graph);
+    assert!(result.is_ok());
+
+    // Find "caller" node
+    let caller_id = graph
+        .query()
+        .node_type(codegraph::NodeType::Function)
+        .execute()
+        .unwrap()
+        .into_iter()
+        .find(|&id| {
+            graph
+                .get_node(id)
+                .map(|n| n.properties.get_string("name") == Some("caller"))
+                .unwrap_or(false)
+        })
+        .expect("Should find 'caller' function");
+
+    // Check outgoing Calls edges
+    let callees: Vec<String> = graph
+        .get_neighbors(caller_id, Direction::Outgoing)
+        .unwrap_or_default()
+        .iter()
+        .filter(|&&neighbor_id| {
+            graph
+                .get_edges_between(caller_id, neighbor_id)
+                .unwrap_or_default()
+                .iter()
+                .any(|&e| {
+                    graph
+                        .get_edge(e)
+                        .map(|edge| edge.edge_type == EdgeType::Calls)
+                        .unwrap_or(false)
+                })
+        })
+        .map(|&id| {
+            graph
+                .get_node(id)
+                .map(|n| n.properties.get_string("name").unwrap_or("?").to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+
+    eprintln!("Callees of 'caller': {:?}", callees);
+    assert!(
+        callees.contains(&"associated".to_string()),
+        "Should have Calls edge to 'associated'"
+    );
+    assert!(
+        callees.contains(&"instance_method".to_string()),
+        "Should have Calls edge to 'instance_method'"
+    );
+    assert!(
+        callees.contains(&"standalone".to_string()),
+        "Should have Calls edge to 'standalone'"
+    );
+}

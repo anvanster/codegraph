@@ -10,6 +10,14 @@ use codegraph_parser_api::{
 };
 use tree_sitter::Node;
 
+fn is_ident_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+fn is_ident_continue(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
 /// Visitor that extracts entities and relationships from Rust AST
 pub struct RustVisitor<'a> {
     pub source: &'a [u8],
@@ -724,10 +732,105 @@ impl<'a> RustVisitor<'a> {
     fn visit_body_for_calls(&mut self, node: Node) {
         if node.kind() == "call_expression" {
             self.visit_call_expression(node);
+        } else if node.kind() == "macro_invocation" {
+            // Macro bodies are opaque token trees — tree-sitter doesn't parse
+            // the content as Rust AST. Extract call-like patterns heuristically
+            // by scanning for `identifier (` sequences in the token tree text.
+            self.extract_calls_from_macro(node);
+            return; // Don't recurse into token_tree children
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.visit_body_for_calls(child);
+        }
+    }
+
+    /// Extract call-like patterns from macro invocation token trees.
+    ///
+    /// Since tree-sitter treats macro bodies as opaque token trees, we use
+    /// a regex-like scan to find `identifier(` patterns. This catches calls
+    /// inside `tokio::select!`, `tokio::spawn(async { ... })`, etc.
+    fn extract_calls_from_macro(&mut self, node: Node) {
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        let text = self.node_text(node);
+
+        // Simple state machine to find `name(` patterns, handling:
+        // - simple: foo(...)
+        // - method: self.foo(...)
+        // - scoped: Self::foo(...)
+        // - chained: a.b.foo(...)  → extract "foo"
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+
+        while i < len {
+            // Skip non-identifier starts
+            if !is_ident_start(bytes[i]) {
+                i += 1;
+                continue;
+            }
+
+            // Collect identifier
+            let start = i;
+            while i < len && is_ident_continue(bytes[i]) {
+                i += 1;
+            }
+            let ident = &text[start..i];
+
+            // Skip whitespace
+            while i < len && bytes[i] == b' ' {
+                i += 1;
+            }
+
+            if i < len && bytes[i] == b'(' {
+                // Found `ident(` — this looks like a call
+                let callee = if ident == "self" || ident == "Self" {
+                    // Skip — not a real callee name
+                    i += 1;
+                    continue;
+                } else {
+                    ident.to_string()
+                };
+
+                // Skip common non-function identifiers
+                if !callee.is_empty()
+                    && callee != "if"
+                    && callee != "for"
+                    && callee != "while"
+                    && callee != "match"
+                    && callee != "loop"
+                    && callee != "return"
+                    && callee != "let"
+                    && callee != "mut"
+                    && callee != "async"
+                    && callee != "await"
+                    && callee != "move"
+                    && callee != "Some"
+                    && callee != "None"
+                    && callee != "Ok"
+                    && callee != "Err"
+                {
+                    self.calls.push(CallRelation::new(
+                        caller.clone(),
+                        callee,
+                        node.start_position().row + 1,
+                    ));
+                }
+            } else if i < len && bytes[i] == b':' && i + 1 < len && bytes[i + 1] == b':' {
+                // Skip past `::` for scoped paths like Self::method
+                i += 2;
+                continue;
+            } else if i < len && bytes[i] == b'.' {
+                // Skip past `.` for method chains like self.method
+                i += 1;
+                continue;
+            }
+
+            i += 1;
         }
     }
 
@@ -1073,6 +1176,75 @@ fn helper() {}
         );
         let callers: Vec<&str> = visitor.calls.iter().map(|c| c.caller.as_str()).collect();
         assert!(callers.contains(&"method"));
+    }
+
+    #[test]
+    fn test_visitor_scoped_and_self_calls() {
+        // Verify Self::method(), self.method(), and closure calls are all extracted
+        let source = r#"
+struct Foo;
+
+impl Foo {
+    fn caller(&self) {
+        Self::associated();
+        self.instance_method();
+        let cb = || { standalone(); };
+    }
+    fn associated() {}
+    fn instance_method(&self) {}
+}
+fn standalone() {}
+"#;
+        let visitor = parse_and_visit(source);
+        let calls: Vec<String> = visitor
+            .calls
+            .iter()
+            .map(|c| format!("{} -> {}", c.caller, c.callee))
+            .collect();
+        assert!(
+            calls.contains(&"caller -> associated".to_string()),
+            "Should extract Self::associated()"
+        );
+        assert!(
+            calls.contains(&"caller -> instance_method".to_string()),
+            "Should extract self.instance_method()"
+        );
+        assert!(
+            calls.contains(&"caller -> standalone".to_string()),
+            "Should extract closure call"
+        );
+    }
+
+    #[test]
+    fn test_visitor_calls_inside_macro() {
+        // tokio::select!, vec![], println!() etc. — calls inside macro bodies
+        let source = r#"
+fn outer() {
+    some_macro! {
+        inner();
+    }
+    direct();
+}
+
+fn inner() {}
+fn direct() {}
+"#;
+        let visitor = parse_and_visit(source);
+        let calls: Vec<String> = visitor
+            .calls
+            .iter()
+            .map(|c| format!("{} -> {}", c.caller, c.callee))
+            .collect();
+        eprintln!("Calls (macro): {:?}", calls);
+        assert!(
+            calls.contains(&"outer -> direct".to_string()),
+            "Direct call should work"
+        );
+        // Calls inside macros are now extracted via heuristic token scanning
+        assert!(
+            calls.contains(&"outer -> inner".to_string()),
+            "Should extract calls from macro token trees"
+        );
     }
 
     #[test]
