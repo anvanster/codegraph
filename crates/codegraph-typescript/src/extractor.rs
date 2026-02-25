@@ -81,6 +81,7 @@ pub fn extract(
     ir.calls = visitor.calls;
     ir.implementations = visitor.implementations;
     ir.inheritance = visitor.inheritance;
+    ir.type_references = visitor.type_references;
 
     Ok(ir)
 }
@@ -394,5 +395,59 @@ function Counter() {
         let counter_fn = ir.functions.iter().find(|f| f.name == "Counter");
         assert!(counter_fn.is_some(), "Counter function should be extracted");
         assert_eq!(ir.imports.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_type_references() {
+        let source = r#"
+interface MyParams {
+    uri: string;
+}
+
+interface MyResponse {
+    data: MyParams;
+}
+
+function process(params: MyParams): MyResponse {
+    return { data: params };
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.ts"), &config);
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+
+        eprintln!("type_references: {:?}", ir.type_references);
+
+        // process should reference MyParams (param) and MyResponse (return)
+        let process_refs: Vec<_> = ir
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "process")
+            .map(|r| r.type_name.as_str())
+            .collect();
+        assert!(
+            process_refs.contains(&"MyParams"),
+            "process should reference MyParams. Got: {:?}",
+            process_refs
+        );
+        assert!(
+            process_refs.contains(&"MyResponse"),
+            "process should reference MyResponse. Got: {:?}",
+            process_refs
+        );
+
+        // MyResponse has field type MyParams
+        let response_refs: Vec<_> = ir
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "MyResponse")
+            .map(|r| r.type_name.as_str())
+            .collect();
+        assert!(
+            response_refs.contains(&"MyParams"),
+            "MyResponse should reference MyParams via field type. Got: {:?}",
+            response_refs
+        );
     }
 }

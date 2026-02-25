@@ -359,6 +359,22 @@ pub fn ir_to_graph(
         }
     }
 
+    // Add type reference relationships (creates References edges)
+    for type_ref in &ir.type_references {
+        if let Some(&referrer_id) = node_map.get(&type_ref.referrer) {
+            if let Some(&type_id) = node_map.get(&type_ref.type_name) {
+                // Both referrer and type are in this file — create direct edge
+                let _ = graph.add_edge(
+                    referrer_id,
+                    type_id,
+                    EdgeType::References,
+                    PropertyMap::new(),
+                );
+            }
+            // Skip unresolved types — they'll be external types or built-ins
+        }
+    }
+
     // Add implementation relationships
     for impl_rel in &ir.implementations {
         if let (Some(&implementor_id), Some(&trait_id)) = (
@@ -937,6 +953,69 @@ mod tests {
         assert!(
             found_resolved_path,
             "Import edge should have resolved_path property for relative imports"
+        );
+    }
+
+    #[test]
+    fn test_ir_to_graph_with_type_references() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::TypeReference;
+
+        let mut ir = CodeIR::new(PathBuf::from("test.ts"));
+        ir.add_function(FunctionEntity::new("process", 10, 15));
+        ir.add_trait(TraitEntity::new("MyParams", 1, 4));
+        ir.add_trait(TraitEntity::new("MyResponse", 6, 9));
+        ir.type_references.push(TypeReference::new(
+            "process".to_string(),
+            "MyParams".to_string(),
+            10,
+        ));
+        ir.type_references.push(TypeReference::new(
+            "process".to_string(),
+            "MyResponse".to_string(),
+            10,
+        ));
+        ir.type_references.push(TypeReference::new(
+            "MyResponse".to_string(),
+            "MyParams".to_string(),
+            7,
+        ));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.ts").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+
+        let func_id = file_info.functions[0];
+        let params_id = file_info.traits[0];
+        let response_id = file_info.traits[1];
+
+        // process -> MyParams (References)
+        let edges = graph.get_edges_between(func_id, params_id).unwrap();
+        assert!(
+            edges
+                .iter()
+                .any(|&e| graph.get_edge(e).unwrap().edge_type == EdgeType::References),
+            "process should have References edge to MyParams"
+        );
+
+        // process -> MyResponse (References)
+        let edges = graph.get_edges_between(func_id, response_id).unwrap();
+        assert!(
+            edges
+                .iter()
+                .any(|&e| graph.get_edge(e).unwrap().edge_type == EdgeType::References),
+            "process should have References edge to MyResponse"
+        );
+
+        // MyResponse -> MyParams (References via field type)
+        let edges = graph.get_edges_between(response_id, params_id).unwrap();
+        assert!(
+            edges
+                .iter()
+                .any(|&e| graph.get_edge(e).unwrap().edge_type == EdgeType::References),
+            "MyResponse should have References edge to MyParams"
         );
     }
 

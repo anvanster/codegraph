@@ -738,10 +738,83 @@ impl<'a> RustVisitor<'a> {
             // by scanning for `identifier (` sequences in the token tree text.
             self.extract_calls_from_macro(node);
             return; // Don't recurse into token_tree children
+        } else if node.kind() == "scoped_identifier" {
+            // Detect method references like `Self::method_name` used as values
+            // (e.g., `.filter_map(Self::parse_kind_str)`)
+            self.visit_method_reference(node);
+        } else if node.kind() == "field_expression" {
+            // Detect method references like `self.method_name` used as values
+            // (only when NOT part of a call expression — calls are handled above)
+            if node.parent().map(|p| p.kind()) != Some("call_expression") {
+                self.visit_field_reference(node);
+            }
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.visit_body_for_calls(child);
+        }
+    }
+
+    /// Detect `Self::method_name` used as a value (method reference / function pointer).
+    /// E.g., `.filter_map(Self::parse_kind_str)` — this is NOT a call_expression.
+    fn visit_method_reference(&mut self, node: Node) {
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        // Only match Self:: prefix (not arbitrary paths like std::mem::swap)
+        if let Some(path) = node.child_by_field_name("path") {
+            let path_text = self.node_text(path);
+            if path_text == "Self" || path_text == "self" {
+                if let Some(name) = node.child_by_field_name("name") {
+                    let method_name = self.node_text(name);
+                    if !method_name.is_empty() {
+                        // Skip if this scoped_identifier is the function part of a call_expression
+                        // (that case is already handled by visit_call_expression)
+                        if node.parent().map(|p| p.kind()) == Some("call_expression") {
+                            if let Some(parent) = node.parent() {
+                                if parent
+                                    .child_by_field_name("function")
+                                    .map(|f| f.id() == node.id())
+                                    .unwrap_or(false)
+                                {
+                                    return;
+                                }
+                            }
+                        }
+                        self.calls.push(CallRelation::new(
+                            caller,
+                            method_name,
+                            node.start_position().row + 1,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Detect `self.method_name` used as a value (not a call).
+    fn visit_field_reference(&mut self, node: Node) {
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        // Check that the object is `self`
+        if let Some(object) = node.child_by_field_name("value") {
+            if self.node_text(object) == "self" {
+                if let Some(field) = node.child_by_field_name("field") {
+                    let method_name = self.node_text(field);
+                    if !method_name.is_empty() {
+                        self.calls.push(CallRelation::new(
+                            caller,
+                            method_name,
+                            node.start_position().row + 1,
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -1244,6 +1317,38 @@ fn direct() {}
         assert!(
             calls.contains(&"outer -> inner".to_string()),
             "Should extract calls from macro token trees"
+        );
+    }
+
+    #[test]
+    fn test_visitor_method_references() {
+        // Method references passed as values (not called directly)
+        // e.g., `.filter_map(Self::parse_kind_str)` or `.map(self.transform)`
+        let source = r#"
+struct Foo;
+
+impl Foo {
+    fn parse_kind_str(s: &str) -> Option<i32> { None }
+    fn transform(&self, x: i32) -> i32 { x }
+
+    fn caller(&self) {
+        let items: Vec<_> = vec!["a"].iter().filter_map(Self::parse_kind_str).collect();
+        Self::parse_kind_str("test");
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let calls: Vec<String> = visitor
+            .calls
+            .iter()
+            .map(|c| format!("{} -> {}", c.caller, c.callee))
+            .collect();
+        eprintln!("Calls (method refs): {:?}", calls);
+        // The method reference Self::parse_kind_str should appear as a call
+        assert!(
+            calls.contains(&"caller -> parse_kind_str".to_string()),
+            "Should detect Self::parse_kind_str method reference. Got: {:?}",
+            calls
         );
     }
 

@@ -1,6 +1,8 @@
 use crate::{
     entities::{ClassEntity, FunctionEntity, ModuleEntity, TraitEntity},
-    relationships::{CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation},
+    relationships::{
+        CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation, TypeReference,
+    },
 };
 use std::path::PathBuf;
 
@@ -37,6 +39,9 @@ pub struct CodeIR {
 
     /// Implementation relationships
     pub implementations: Vec<ImplementationRelation>,
+
+    /// Type reference relationships (entity → type it uses in annotations)
+    pub type_references: Vec<TypeReference>,
 }
 
 impl CodeIR {
@@ -58,7 +63,11 @@ impl CodeIR {
 
     /// Total number of relationships
     pub fn relationship_count(&self) -> usize {
-        self.calls.len() + self.imports.len() + self.inheritance.len() + self.implementations.len()
+        self.calls.len()
+            + self.imports.len()
+            + self.inheritance.len()
+            + self.implementations.len()
+            + self.type_references.len()
     }
 
     /// Add a module entity
@@ -99,5 +108,10 @@ impl CodeIR {
     /// Add an implementation relationship
     pub fn add_implementation(&mut self, implementation: ImplementationRelation) {
         self.implementations.push(implementation);
+    }
+
+    /// Add a type reference relationship
+    pub fn add_type_reference(&mut self, type_ref: TypeReference) {
+        self.type_references.push(type_ref);
     }
 }

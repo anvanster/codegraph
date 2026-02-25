@@ -3,6 +3,7 @@
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
     ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
+    TypeReference,
 };
 use tree_sitter::Node;
 
@@ -16,6 +17,7 @@ pub struct TypeScriptVisitor<'a> {
     pub calls: Vec<CallRelation>,
     pub implementations: Vec<ImplementationRelation>,
     pub inheritance: Vec<InheritanceRelation>,
+    pub type_references: Vec<TypeReference>,
     current_class: Option<String>,
     current_function: Option<String>,
 }
@@ -31,6 +33,7 @@ impl<'a> TypeScriptVisitor<'a> {
             calls: Vec::new(),
             implementations: Vec::new(),
             inheritance: Vec::new(),
+            type_references: Vec::new(),
             current_class: None,
             current_function: None,
         }
@@ -131,6 +134,9 @@ impl<'a> TypeScriptVisitor<'a> {
 
         self.functions.push(func);
 
+        // Extract type references from parameter and return type annotations
+        self.extract_type_refs_from_function(&name, node);
+
         // Set current function context and visit body to extract calls
         let previous_function = self.current_function.clone();
         self.current_function = Some(name);
@@ -147,7 +153,21 @@ impl<'a> TypeScriptVisitor<'a> {
     }
 
     fn visit_arrow_function(&mut self, node: Node) {
-        // Calculate complexity from the arrow function body
+        // When inside a named function/method, don't create a separate entity —
+        // just recurse into the body so calls are attributed to the enclosing function.
+        // This ensures `this.formatCallGraph()` inside an arrow callback within
+        // `registerTools()` creates a Calls edge from registerTools → formatCallGraph.
+        if self.current_function.is_some() {
+            if let Some(body) = node.child_by_field_name("body") {
+                let mut cursor = body.walk();
+                for child in body.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            }
+            return;
+        }
+
+        // Top-level arrow function (e.g., `const func = () => {...}`)
         let complexity = node
             .child_by_field_name("body")
             .map(|body| self.calculate_complexity(body));
@@ -171,6 +191,9 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        // Visit body for calls (current_function remains None, so calls won't be recorded
+        // unless we set it — for top-level arrows, calls are truly unresolvable)
     }
 
     fn visit_method(&mut self, node: Node) {
@@ -229,6 +252,9 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        // Extract type references from parameter and return type annotations
+        self.extract_type_refs_from_function(&name, node);
 
         // Set current function context and visit body to extract calls
         let previous_function = self.current_function.clone();
@@ -294,10 +320,80 @@ impl<'a> TypeScriptVisitor<'a> {
             .map(|n| self.node_text(n))
             .unwrap_or_else(|| "AnonymousInterface".to_string());
 
+        let line = node.start_position().row + 1;
+
+        // Extract type references from interface body (property types, method signatures)
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                match child.kind() {
+                    "property_signature" | "public_field_definition" => {
+                        if let Some(type_node) = child.child_by_field_name("type") {
+                            for type_name in self.extract_type_names(type_node) {
+                                self.type_references.push(TypeReference::new(
+                                    name.clone(),
+                                    type_name,
+                                    line,
+                                ));
+                            }
+                        }
+                    }
+                    "method_signature" => {
+                        // Extract param and return type refs from method signature
+                        if let Some(params) = child.child_by_field_name("parameters") {
+                            let mut pcursor = params.walk();
+                            for param in params.children(&mut pcursor) {
+                                if param.kind() == "required_parameter"
+                                    || param.kind() == "optional_parameter"
+                                {
+                                    if let Some(type_node) = param.child_by_field_name("type") {
+                                        for type_name in self.extract_type_names(type_node) {
+                                            self.type_references.push(TypeReference::new(
+                                                name.clone(),
+                                                type_name,
+                                                line,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(return_type) = child.child_by_field_name("return_type") {
+                            for type_name in self.extract_type_names(return_type) {
+                                self.type_references.push(TypeReference::new(
+                                    name.clone(),
+                                    type_name,
+                                    line,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Extract extends clause for interface inheritance
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "extends_type_clause" {
+                let mut ext_cursor = child.walk();
+                for ext_child in child.children(&mut ext_cursor) {
+                    for type_name in self.extract_type_names(ext_child) {
+                        self.type_references.push(TypeReference::new(
+                            name.clone(),
+                            type_name,
+                            line,
+                        ));
+                    }
+                }
+            }
+        }
+
         let interface = TraitEntity {
             name,
             visibility: "public".to_string(),
-            line_start: node.start_position().row + 1,
+            line_start: line,
             line_end: node.end_position().row + 1,
             required_methods: Vec::new(),
             parent_traits: Vec::new(),
@@ -447,6 +543,123 @@ impl<'a> TypeScriptVisitor<'a> {
         }
 
         parameters
+    }
+
+    /// Extract user-defined type names from a type annotation node.
+    /// Skips built-in types (string, number, boolean, etc.) and returns
+    /// only identifiers that could be user-defined types/interfaces/classes.
+    fn extract_type_names(&self, type_node: Node) -> Vec<String> {
+        let mut names = Vec::new();
+        match type_node.kind() {
+            "type_identifier" => {
+                let name = self.node_text(type_node);
+                if !Self::is_builtin_type(&name) {
+                    names.push(name);
+                }
+            }
+            "generic_type" => {
+                // e.g., Promise<T>, Array<string> — extract the base type and type args
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "union_type" | "intersection_type" => {
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "array_type" => {
+                // e.g., MyType[] — extract element type
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "type_arguments" => {
+                // <T, U> — extract each type argument
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "type_annotation" => {
+                // type_annotation wraps `: TypeName` — recurse into children
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            _ => {}
+        }
+        names
+    }
+
+    fn is_builtin_type(name: &str) -> bool {
+        matches!(
+            name,
+            "string"
+                | "number"
+                | "boolean"
+                | "void"
+                | "null"
+                | "undefined"
+                | "never"
+                | "any"
+                | "unknown"
+                | "object"
+                | "symbol"
+                | "bigint"
+                | "Promise"
+                | "Array"
+                | "Map"
+                | "Set"
+                | "Record"
+                | "Partial"
+                | "Required"
+                | "Readonly"
+                | "Pick"
+                | "Omit"
+                | "Exclude"
+                | "Extract"
+                | "NonNullable"
+                | "ReturnType"
+                | "Parameters"
+                | "InstanceType"
+                | "Awaited"
+        )
+    }
+
+    /// Extract type references from a function/method node's parameters and return type.
+    fn extract_type_refs_from_function(&mut self, name: &str, node: Node) {
+        let line = node.start_position().row + 1;
+
+        // Extract from parameter type annotations
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            for child in params_node.children(&mut cursor) {
+                if child.kind() == "required_parameter" || child.kind() == "optional_parameter" {
+                    if let Some(type_node) = child.child_by_field_name("type") {
+                        for type_name in self.extract_type_names(type_node) {
+                            self.type_references.push(TypeReference::new(
+                                name.to_string(),
+                                type_name,
+                                line,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract from return type annotation
+        if let Some(return_type_node) = node.child_by_field_name("return_type") {
+            for type_name in self.extract_type_names(return_type_node) {
+                self.type_references
+                    .push(TypeReference::new(name.to_string(), type_name, line));
+            }
+        }
     }
 
     /// Visit a call expression and extract the call relationship

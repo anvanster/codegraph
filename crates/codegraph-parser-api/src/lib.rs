@@ -74,7 +74,7 @@ pub use errors::{ParserError, ParserResult};
 pub use ir::CodeIR;
 pub use metrics::ParserMetrics;
 pub use relationships::{
-    CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation,
+    CallRelation, ImplementationRelation, ImportRelation, InheritanceRelation, TypeReference,
 };
 pub use traits::{CodeParser, FileInfo, ProjectInfo};
 
