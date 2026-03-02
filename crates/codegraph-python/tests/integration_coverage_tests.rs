@@ -141,8 +141,17 @@ async def async_function():
 
     let file_info = result.unwrap();
 
-    // Should capture classes, traits/protocols, functions
-    assert!(file_info.classes.len() >= 3, "Should have multiple classes");
+    // Should capture classes (Person, Dog), traits (Serializable, Animal), and functions
+    assert!(
+        file_info.classes.len() >= 2,
+        "Should have at least 2 classes (Person, Dog), got {}",
+        file_info.classes.len()
+    );
+    assert!(
+        file_info.traits.len() >= 2,
+        "Should have at least 2 traits (Serializable Protocol, Animal ABC), got {}",
+        file_info.traits.len()
+    );
     assert!(!file_info.imports.is_empty(), "Should have imports");
     assert!(!file_info.functions.is_empty(), "Should have functions");
 }

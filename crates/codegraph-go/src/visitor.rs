@@ -2,7 +2,7 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
-    ImportRelation, TraitEntity,
+    ImportRelation, Parameter, TraitEntity,
 };
 use tree_sitter::Node;
 
@@ -70,6 +70,17 @@ impl<'a> GoVisitor<'a> {
             .child_by_field_name("body")
             .map(|body| self.calculate_complexity(body));
 
+        // In Go, exported names start with uppercase
+        let visibility = if name.starts_with(|c: char| c.is_uppercase()) {
+            "public"
+        } else {
+            "private"
+        };
+
+        let parameters = self.extract_parameters(node);
+        let return_type = self.extract_return_type(node);
+        let is_test = name.starts_with("Test") || name.starts_with("Benchmark");
+
         let func = FunctionEntity {
             name,
             signature: self
@@ -78,15 +89,15 @@ impl<'a> GoVisitor<'a> {
                 .next()
                 .unwrap_or("")
                 .to_string(),
-            visibility: "public".to_string(),
+            visibility: visibility.to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
             is_async: false,
-            is_test: false,
+            is_test,
             is_static: false,
             is_abstract: false,
-            parameters: Vec::new(),
-            return_type: None,
+            parameters,
+            return_type,
             doc_comment: None,
             attributes: Vec::new(),
             parent_class: None,
@@ -115,6 +126,31 @@ impl<'a> GoVisitor<'a> {
             .child_by_field_name("body")
             .map(|body| self.calculate_complexity(body));
 
+        // Extract receiver type for parent_class
+        let parent_class = node.child_by_field_name("receiver").and_then(|recv| {
+            // receiver is a parameter_list containing a parameter_declaration
+            let mut cursor = recv.walk();
+            for child in recv.children(&mut cursor) {
+                if child.kind() == "parameter_declaration" {
+                    // The type is the last meaningful child (may be pointer_type or type_identifier)
+                    if let Some(type_node) = child.child_by_field_name("type") {
+                        let text = self.node_text(type_node);
+                        return Some(text.trim_start_matches('*').to_string());
+                    }
+                }
+            }
+            None
+        });
+
+        let visibility = if name.starts_with(|c: char| c.is_uppercase()) {
+            "public"
+        } else {
+            "private"
+        };
+
+        let parameters = self.extract_parameters(node);
+        let return_type = self.extract_return_type(node);
+
         let func = FunctionEntity {
             name,
             signature: self
@@ -123,18 +159,18 @@ impl<'a> GoVisitor<'a> {
                 .next()
                 .unwrap_or("")
                 .to_string(),
-            visibility: "public".to_string(),
+            visibility: visibility.to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
             is_async: false,
             is_test: false,
             is_static: false,
             is_abstract: false,
-            parameters: Vec::new(),
-            return_type: None,
+            parameters,
+            return_type,
             doc_comment: None,
             attributes: Vec::new(),
-            parent_class: None,
+            parent_class,
             complexity,
         };
 
@@ -145,6 +181,86 @@ impl<'a> GoVisitor<'a> {
         }
 
         self.current_function = previous_function;
+    }
+
+    /// Extract parameters from a function/method declaration
+    fn extract_parameters(&self, node: Node) -> Vec<Parameter> {
+        let mut params = Vec::new();
+
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            for child in params_node.children(&mut cursor) {
+                match child.kind() {
+                    "parameter_declaration" => {
+                        let type_annotation =
+                            child.child_by_field_name("type").map(|n| self.node_text(n));
+
+                        // A parameter_declaration can have multiple names (a, b int)
+                        let mut names = Vec::new();
+                        let mut inner_cursor = child.walk();
+                        for inner in child.children(&mut inner_cursor) {
+                            if inner.kind() == "identifier" {
+                                names.push(self.node_text(inner));
+                            }
+                        }
+
+                        if names.is_empty() {
+                            // Unnamed parameter (just a type)
+                            params.push(Parameter {
+                                name: String::new(),
+                                type_annotation: type_annotation.clone(),
+                                default_value: None,
+                                is_variadic: false,
+                            });
+                        } else {
+                            for param_name in names {
+                                params.push(Parameter {
+                                    name: param_name,
+                                    type_annotation: type_annotation.clone(),
+                                    default_value: None,
+                                    is_variadic: false,
+                                });
+                            }
+                        }
+                    }
+                    "variadic_parameter_declaration" => {
+                        // Go variadic: nums ...int
+                        let mut param_name = String::new();
+                        let mut type_annotation = None;
+
+                        let mut inner_cursor = child.walk();
+                        for inner in child.children(&mut inner_cursor) {
+                            if inner.kind() == "identifier" {
+                                param_name = self.node_text(inner);
+                            }
+                        }
+                        // The type is the child after "..."
+                        if let Some(type_node) = child.child_by_field_name("type") {
+                            type_annotation = Some(self.node_text(type_node));
+                        }
+
+                        params.push(Parameter {
+                            name: param_name,
+                            type_annotation,
+                            default_value: None,
+                            is_variadic: true,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        params
+    }
+
+    /// Extract return type from a function/method declaration
+    fn extract_return_type(&self, node: Node) -> Option<String> {
+        node.child_by_field_name("result").map(|n| {
+            let text = self.node_text(n);
+            // Clean up parenthesized multiple returns: (int, error) stays as-is
+            text.trim().to_string()
+        })
     }
 
     fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {
@@ -682,6 +798,91 @@ mod tests {
         visitor.visit_node(tree.root_node());
 
         assert_eq!(visitor.calls.len(), 0);
+    }
+
+    #[test]
+    fn test_parameter_extraction() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc add(a int, b int) int { return a + b }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let func = &visitor.functions[0];
+        assert_eq!(func.parameters.len(), 2, "Should extract 2 parameters");
+        assert_eq!(func.parameters[0].name, "a");
+        assert_eq!(func.parameters[0].type_annotation.as_deref(), Some("int"));
+        assert_eq!(func.parameters[1].name, "b");
+        assert_eq!(func.return_type.as_deref(), Some("int"));
+    }
+
+    #[test]
+    fn test_variadic_parameter() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc sum(nums ...int) int { return 0 }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let func = &visitor.functions[0];
+        assert_eq!(func.parameters.len(), 1);
+        assert!(
+            func.parameters[0].is_variadic,
+            "Should detect variadic parameter"
+        );
+    }
+
+    #[test]
+    fn test_multiple_return_values() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc divide(a, b float64) (float64, error) { return 0, nil }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let func = &visitor.functions[0];
+        assert!(func.return_type.is_some(), "Should extract return type");
+        let ret = func.return_type.as_ref().unwrap();
+        assert!(
+            ret.contains("float64") && ret.contains("error"),
+            "Should capture multiple return types: {}",
+            ret
+        );
+    }
+
+    #[test]
+    fn test_method_parent_class() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\ntype Foo struct{}\nfunc (f *Foo) Bar() string { return \"\" }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        let method = visitor.functions.iter().find(|f| f.name == "Bar").unwrap();
+        assert_eq!(
+            method.parent_class.as_deref(),
+            Some("Foo"),
+            "Method should have parent_class set to receiver type"
+        );
     }
 
     #[test]

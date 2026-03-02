@@ -7,10 +7,31 @@ use crate::config::ParserConfig;
 use crate::visitor::{extract_decorators, extract_docstring};
 use codegraph_parser_api::{
     CallRelation, ClassEntity, CodeIR, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
-    ImportRelation, InheritanceRelation, ModuleEntity, Parameter,
+    ImportRelation, InheritanceRelation, ModuleEntity, Parameter, TraitEntity,
 };
 use std::path::Path;
 use tree_sitter::{Node, Parser};
+
+/// Apply a class extraction result to the IR
+fn apply_class_extraction(ir: &mut CodeIR, extraction: Option<ClassExtraction>) {
+    if let Some(ext) = extraction {
+        for method in ext.methods {
+            ir.add_function(method);
+        }
+        for call in ext.calls {
+            ir.add_call(call);
+        }
+        for inh in ext.inheritance {
+            ir.add_inheritance(inh);
+        }
+        if let Some(class) = ext.class {
+            ir.add_class(class);
+        }
+        if let Some(trait_entity) = ext.trait_entity {
+            ir.add_trait(trait_entity);
+        }
+    }
+}
 
 /// Extract all entities and relationships from Python source code
 pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<CodeIR, String> {
@@ -100,40 +121,17 @@ pub fn extract(source: &str, file_path: &Path, config: &ParserConfig) -> Result<
                             }
                         }
                         "class_definition" => {
-                            if let Some((class, methods, calls, inheritance)) =
-                                extract_class(source_bytes, definition, config)
-                            {
-                                for method in methods {
-                                    ir.add_function(method);
-                                }
-                                for call in calls {
-                                    ir.add_call(call);
-                                }
-                                for inh in inheritance {
-                                    ir.add_inheritance(inh);
-                                }
-                                ir.add_class(class);
-                            }
+                            apply_class_extraction(
+                                &mut ir,
+                                extract_class(source_bytes, definition, config),
+                            );
                         }
                         _ => {}
                     }
                 }
             }
             "class_definition" => {
-                if let Some((class, methods, calls, inheritance)) =
-                    extract_class(source_bytes, child, config)
-                {
-                    for method in methods {
-                        ir.add_function(method);
-                    }
-                    for call in calls {
-                        ir.add_call(call);
-                    }
-                    for inh in inheritance {
-                        ir.add_inheritance(inh);
-                    }
-                    ir.add_class(class);
-                }
+                apply_class_extraction(&mut ir, extract_class(source_bytes, child, config));
             }
             "import_statement" => {
                 let imports = extract_import(source_bytes, child, &module_name);
@@ -235,6 +233,7 @@ fn extract_function(
         .map(|body| calculate_complexity_from_node(source, body));
 
     let mut func = FunctionEntity::new(&name, line_start, line_end);
+    func.visibility = python_visibility(&name);
     func.parameters = parameters;
     func.return_type = return_type;
     func.doc_comment = doc_comment;
@@ -366,18 +365,23 @@ fn extract_parameters(source: &[u8], node: Node) -> Vec<Parameter> {
     params
 }
 
+/// Result of extracting a class definition — may produce a class or trait entity
+struct ClassExtraction {
+    class: Option<ClassEntity>,
+    trait_entity: Option<TraitEntity>,
+    methods: Vec<FunctionEntity>,
+    calls: Vec<CallRelation>,
+    inheritance: Vec<InheritanceRelation>,
+}
+
+/// Known Python enum base classes
+const ENUM_BASES: &[&str] = &["Enum", "IntEnum", "Flag", "IntFlag", "StrEnum", "auto"];
+
+/// Known Python abstract base classes / protocols
+const ABC_BASES: &[&str] = &["ABC", "ABCMeta", "Protocol"];
+
 /// Extract a class entity with its methods
-#[allow(clippy::type_complexity)]
-fn extract_class(
-    source: &[u8],
-    node: Node,
-    config: &ParserConfig,
-) -> Option<(
-    ClassEntity,
-    Vec<FunctionEntity>,
-    Vec<CallRelation>,
-    Vec<InheritanceRelation>,
-)> {
+fn extract_class(source: &[u8], node: Node, config: &ParserConfig) -> Option<ClassExtraction> {
     let name = node
         .child_by_field_name("name")
         .map(|n| n.utf8_text(source).unwrap_or("Class").to_string())?;
@@ -387,20 +391,32 @@ fn extract_class(
 
     // Extract base classes
     let mut inheritance = Vec::new();
+    let mut base_class_names = Vec::new();
     if let Some(bases) = node.child_by_field_name("superclasses") {
-        // The superclasses field is the argument_list directly
         let mut cursor = bases.walk();
         for child in bases.children(&mut cursor) {
             if let Some(base_name) = extract_base_class_name(source, child) {
+                base_class_names.push(base_name.clone());
                 inheritance.push(InheritanceRelation::new(&name, base_name));
             }
         }
     }
 
+    // Detect enum and ABC/Protocol patterns from base classes
+    let is_enum = base_class_names
+        .iter()
+        .any(|b| ENUM_BASES.iter().any(|e| b.ends_with(e)));
+    let is_abc = base_class_names
+        .iter()
+        .any(|b| ABC_BASES.iter().any(|a| b.ends_with(a)));
+
     // Extract docstring
     let doc_comment = node
         .child_by_field_name("body")
         .and_then(|body| extract_docstring(source, body));
+
+    // Determine visibility from name prefix
+    let visibility = python_visibility(&name);
 
     // Extract methods and calls
     let mut methods = Vec::new();
@@ -447,11 +463,76 @@ fn extract_class(
         }
     }
 
+    // If this is an ABC or Protocol, create a TraitEntity instead
+    if is_abc {
+        let required_methods: Vec<FunctionEntity> = methods
+            .iter()
+            .filter(|m| m.attributes.iter().any(|a| a.contains("abstractmethod")))
+            .cloned()
+            .map(|mut m| {
+                m.is_abstract = true;
+                m
+            })
+            .collect();
+
+        let parent_traits: Vec<String> = base_class_names
+            .into_iter()
+            .filter(|b| !ABC_BASES.iter().any(|a| b.ends_with(a)))
+            .collect();
+
+        let trait_entity = TraitEntity {
+            name,
+            visibility,
+            line_start,
+            line_end,
+            required_methods,
+            parent_traits,
+            doc_comment,
+            attributes: Vec::new(),
+        };
+
+        return Some(ClassExtraction {
+            class: None,
+            trait_entity: Some(trait_entity),
+            methods,
+            calls,
+            inheritance,
+        });
+    }
+
     let mut class = ClassEntity::new(&name, line_start, line_end);
     class.doc_comment = doc_comment;
     class.methods = methods.clone();
+    class.visibility = visibility;
 
-    Some((class, methods, calls, inheritance))
+    if is_enum {
+        class.attributes = vec!["enum".to_string()];
+    }
+
+    Some(ClassExtraction {
+        class: Some(class),
+        trait_entity: None,
+        methods,
+        calls,
+        inheritance,
+    })
+}
+
+/// Determine Python visibility from name prefix conventions
+fn python_visibility(name: &str) -> String {
+    let is_dunder = name.starts_with("__") && name.ends_with("__") && name.len() > 4;
+    if is_dunder {
+        // Dunder methods (__init__, __str__, etc.) are public API
+        "public".to_string()
+    } else if name.starts_with("__") {
+        // Name-mangled: __private
+        "private".to_string()
+    } else if name.starts_with('_') {
+        // Convention: _protected
+        "protected".to_string()
+    } else {
+        "public".to_string()
+    }
 }
 
 /// Extract base class name from an argument node
@@ -993,6 +1074,91 @@ def risky():
         assert_eq!(ir.functions[0].line_start, 1);
         assert_eq!(ir.functions[1].name, "second");
         assert_eq!(ir.functions[1].line_start, 4);
+    }
+
+    #[test]
+    fn test_enum_detection() {
+        let source = r#"
+from enum import Enum, IntEnum
+
+class Color(Enum):
+    RED = 1
+    GREEN = 2
+    BLUE = 3
+
+class Status(IntEnum):
+    PENDING = 0
+    ACTIVE = 1
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.classes.len(), 2);
+        assert!(
+            ir.classes[0].attributes.contains(&"enum".to_string()),
+            "Color should have enum attribute"
+        );
+        assert!(
+            ir.classes[1].attributes.contains(&"enum".to_string()),
+            "Status should have enum attribute"
+        );
+    }
+
+    #[test]
+    fn test_abc_to_trait() {
+        let source = r#"
+from abc import ABC, abstractmethod
+
+class Animal(ABC):
+    @abstractmethod
+    def make_sound(self) -> str:
+        pass
+
+    def breathe(self):
+        pass
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig::default();
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.classes.len(), 0, "ABC should not produce a ClassEntity");
+        assert_eq!(ir.traits.len(), 1, "ABC should produce a TraitEntity");
+        assert_eq!(ir.traits[0].name, "Animal");
+
+        // Only @abstractmethod methods should be in required_methods
+        assert_eq!(ir.traits[0].required_methods.len(), 1);
+        assert_eq!(ir.traits[0].required_methods[0].name, "make_sound");
+        assert!(ir.traits[0].required_methods[0].is_abstract);
+    }
+
+    #[test]
+    fn test_visibility_from_name() {
+        let source = r#"
+def public_func():
+    pass
+
+def _protected_func():
+    pass
+
+def __private_func():
+    pass
+
+def __dunder__():
+    pass
+"#;
+        let path = Path::new("test.py");
+        let config = ParserConfig {
+            include_private: true,
+            ..Default::default()
+        };
+        let ir = extract(source, path, &config).unwrap();
+
+        assert_eq!(ir.functions.len(), 4);
+        assert_eq!(ir.functions[0].visibility, "public");
+        assert_eq!(ir.functions[1].visibility, "protected");
+        assert_eq!(ir.functions[2].visibility, "private");
+        assert_eq!(ir.functions[3].visibility, "public"); // dunder methods are public
     }
 
     #[test]

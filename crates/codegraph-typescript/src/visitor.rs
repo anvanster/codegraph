@@ -1,7 +1,7 @@
 //! AST visitor for extracting TypeScript/JavaScript entities
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, Field, FunctionEntity,
     ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, TraitEntity,
     TypeReference,
 };
@@ -62,6 +62,9 @@ impl<'a> TypeScriptVisitor<'a> {
             }
             "interface_declaration" => {
                 self.visit_interface(node);
+            }
+            "enum_declaration" => {
+                self.visit_enum(node);
             }
             "import_statement" => {
                 self.visit_import(node);
@@ -186,13 +189,23 @@ impl<'a> TypeScriptVisitor<'a> {
             .child_by_field_name("body")
             .map(|body| self.calculate_complexity(body));
 
+        // Check if the arrow function or its parent variable declaration starts with "async"
+        let is_async = {
+            let text = self.node_text(node);
+            text.starts_with("async")
+                || node
+                    .parent()
+                    .map(|p| self.node_text(p).starts_with("async"))
+                    .unwrap_or(false)
+        };
+
         let func = FunctionEntity {
             name: "arrow_function".to_string(),
             signature: "() => {}".to_string(),
             visibility: "public".to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
-            is_async: false,
+            is_async,
             is_test: false,
             is_static: false,
             is_abstract: false,
@@ -416,6 +429,68 @@ impl<'a> TypeScriptVisitor<'a> {
         };
 
         self.interfaces.push(interface);
+    }
+
+    fn visit_enum(&mut self, node: Node) {
+        let name = node
+            .child_by_field_name("name")
+            .map(|n| self.node_text(n))
+            .unwrap_or_else(|| "AnonymousEnum".to_string());
+
+        // Extract enum members as fields
+        let mut fields = Vec::new();
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut cursor = body.walk();
+            for child in body.children(&mut cursor) {
+                if child.kind() == "enum_assignment" || child.kind() == "property_identifier" {
+                    let member_name = if child.kind() == "enum_assignment" {
+                        child
+                            .child_by_field_name("name")
+                            .map(|n| self.node_text(n))
+                            .unwrap_or_default()
+                    } else {
+                        self.node_text(child)
+                    };
+
+                    if !member_name.is_empty() {
+                        let default_value = if child.kind() == "enum_assignment" {
+                            child
+                                .child_by_field_name("value")
+                                .map(|n| self.node_text(n))
+                        } else {
+                            None
+                        };
+
+                        fields.push(Field {
+                            name: member_name,
+                            type_annotation: None,
+                            visibility: "public".to_string(),
+                            is_static: true,
+                            is_constant: true,
+                            default_value,
+                        });
+                    }
+                }
+            }
+        }
+
+        let class = ClassEntity {
+            name,
+            visibility: "public".to_string(),
+            line_start: node.start_position().row + 1,
+            line_end: node.end_position().row + 1,
+            is_abstract: false,
+            is_interface: false,
+            base_classes: Vec::new(),
+            implemented_traits: Vec::new(),
+            methods: Vec::new(),
+            fields,
+            doc_comment: None,
+            attributes: vec!["enum".to_string()],
+            type_parameters: Vec::new(),
+        };
+
+        self.classes.push(class);
     }
 
     fn visit_import(&mut self, node: Node) {
@@ -731,11 +806,7 @@ impl<'a> TypeScriptVisitor<'a> {
             };
 
             // Only treat PascalCase names as class instantiations
-            if !class_name.is_empty()
-                && class_name
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_uppercase())
+            if !class_name.is_empty() && class_name.chars().next().is_some_and(|c| c.is_uppercase())
             {
                 self.calls.push(CallRelation {
                     caller: caller.clone(),

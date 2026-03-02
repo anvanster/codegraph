@@ -240,6 +240,41 @@ enum Color {
 
     let result = parser.parse_source(source, Path::new("test.ts"), &mut graph);
     assert!(result.is_ok());
+
+    let info = result.unwrap();
+    assert_eq!(info.classes.len(), 1, "Enum should be extracted as a class");
+
+    // Verify the enum node has the "enum" attribute
+    let class_ids = graph.query().node_type(NodeType::Class).execute().unwrap();
+    assert_eq!(class_ids.len(), 1);
+    let node = graph.get_node(class_ids[0]).unwrap();
+    let name = node.properties.get_string("name").unwrap();
+    assert_eq!(name, "Color");
+}
+
+#[test]
+fn test_parse_const_enum() {
+    let source = r#"
+const enum Direction {
+    Up,
+    Down,
+    Left,
+    Right
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = TypeScriptParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.ts"), &mut graph);
+    assert!(result.is_ok());
+
+    let info = result.unwrap();
+    assert_eq!(
+        info.classes.len(),
+        1,
+        "Const enum should be extracted as a class"
+    );
 }
 
 #[test]

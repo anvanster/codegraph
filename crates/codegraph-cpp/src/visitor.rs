@@ -300,6 +300,7 @@ impl<'a> CppVisitor<'a> {
         func.parameters = params;
         func.return_type = return_type;
         func.is_static = is_static;
+        func.is_async = self.is_coroutine(node);
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
         func.complexity = node
@@ -355,6 +356,7 @@ impl<'a> CppVisitor<'a> {
         func.parameters = params;
         func.return_type = return_type;
         func.is_static = is_static;
+        func.is_async = self.is_coroutine(node);
         func.doc_comment = doc_comment;
         func.parent_class = self.current_class.clone();
         func.complexity = node
@@ -805,6 +807,55 @@ impl<'a> CppVisitor<'a> {
                 return true;
             }
             if child.kind() == "function_specifier" && self.node_text(child) == specifier {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a function is a C++20 coroutine by looking for co_await/co_return/co_yield
+    fn is_coroutine(&self, node: Node) -> bool {
+        // Check return type for coroutine-related types
+        if let Some(ret) = self.extract_return_type(node) {
+            let ret_lower = ret.to_lowercase();
+            if ret_lower.contains("coroutine_handle")
+                || ret_lower.contains("task")
+                || ret_lower.contains("generator")
+                || ret_lower.contains("future")
+                || ret_lower.contains("lazy")
+            {
+                return true;
+            }
+        }
+
+        // Check function body for coroutine keywords
+        if let Some(body) = node.child_by_field_name("body") {
+            return self.has_coroutine_keyword(body);
+        }
+        false
+    }
+
+    /// Recursively check for co_await, co_return, co_yield in a node
+    fn has_coroutine_keyword(&self, node: Node) -> bool {
+        let kind = node.kind();
+        if kind == "co_await_expression"
+            || kind == "co_return_statement"
+            || kind == "co_yield_expression"
+        {
+            return true;
+        }
+
+        // Also check text for keywords (some tree-sitter versions may not have dedicated nodes)
+        if kind == "identifier" || kind == "expression_statement" {
+            let text = self.node_text(node);
+            if text == "co_await" || text == "co_return" || text == "co_yield" {
+                return true;
+            }
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if self.has_coroutine_keyword(child) {
                 return true;
             }
         }

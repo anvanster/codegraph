@@ -1,5 +1,6 @@
 //! Integration tests for the C++ parser
 
+use codegraph::graph::PropertyValue;
 use codegraph::{CodeGraph, NodeType};
 use codegraph_cpp::CppParser;
 use codegraph_parser_api::CodeParser;
@@ -317,4 +318,79 @@ class Broken {
 
     let result = parser.parse_source(source, Path::new("test.cpp"), &mut graph);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_coroutine_detection() {
+    let source = r#"
+#include <coroutine>
+
+struct Task {
+    struct promise_type {
+        Task get_return_object() { return {}; }
+        std::suspend_never initial_suspend() { return {}; }
+        std::suspend_never final_suspend() noexcept { return {}; }
+        void return_void() {}
+        void unhandled_exception() {}
+    };
+};
+
+Task async_function() {
+    co_await std::suspend_always{};
+}
+
+void regular_function() {
+    int x = 42;
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CppParser::new();
+
+    let result = parser.parse_source(source, Path::new("coroutine.cpp"), &mut graph);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let file_info = result.unwrap();
+
+    // Find the coroutine function and regular function by checking graph nodes
+    let mut async_found = false;
+    let mut regular_found = false;
+
+    for func_id in &file_info.functions {
+        let node = graph.get_node(*func_id).unwrap();
+        let name = node
+            .get_property("name")
+            .and_then(|v| {
+                if let PropertyValue::String(s) = v {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or("");
+
+        if name.contains("async_function") {
+            async_found = true;
+            assert!(
+                matches!(
+                    node.get_property("is_async"),
+                    Some(PropertyValue::Bool(true))
+                ),
+                "async_function with co_await should be detected as async, got {:?}",
+                node.get_property("is_async")
+            );
+        } else if name.contains("regular_function") {
+            regular_found = true;
+            assert!(
+                matches!(
+                    node.get_property("is_async"),
+                    Some(PropertyValue::Bool(false)) | None
+                ),
+                "regular_function should not be async"
+            );
+        }
+    }
+
+    assert!(async_found, "Should find async_function");
+    assert!(regular_found, "Should find regular_function");
 }

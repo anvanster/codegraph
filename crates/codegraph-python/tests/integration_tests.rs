@@ -299,9 +299,16 @@ fn test_comprehensive_relationships() {
     let file_info = result.unwrap();
 
     // Should extract all entities
+    // Animal(ABC) is now extracted as a TraitEntity, Dog and Cat remain as classes
     assert!(
-        file_info.classes.len() >= 3,
-        "Should find Animal, Dog, Cat classes"
+        file_info.classes.len() >= 2,
+        "Should find Dog, Cat classes, got {}",
+        file_info.classes.len()
+    );
+    assert!(
+        !file_info.traits.is_empty(),
+        "Should find Animal ABC as trait, got {}",
+        file_info.traits.len()
     );
     assert!(
         file_info.functions.len() >= 2,
