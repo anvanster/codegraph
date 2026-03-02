@@ -360,6 +360,10 @@ pub fn ir_to_graph(
     }
 
     // Add type reference relationships (creates References edges)
+    // Track unresolved type refs per referrer for cross-file resolution
+    let mut unresolved_type_refs: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
     for type_ref in &ir.type_references {
         if let Some(&referrer_id) = node_map.get(&type_ref.referrer) {
             if let Some(&type_id) = node_map.get(&type_ref.type_name) {
@@ -370,8 +374,40 @@ pub fn ir_to_graph(
                     EdgeType::References,
                     PropertyMap::new(),
                 );
+            } else {
+                // Type not in this file — store for cross-file resolution
+                unresolved_type_refs
+                    .entry(type_ref.referrer.clone())
+                    .or_default()
+                    .push(type_ref.type_name.clone());
             }
-            // Skip unresolved types — they'll be external types or built-ins
+        }
+    }
+
+    // Store unresolved type refs on referrer nodes for post-processing
+    for (referrer_name, types) in unresolved_type_refs {
+        if let Some(&referrer_id) = node_map.get(&referrer_name) {
+            if let Ok(node) = graph.get_node(referrer_id) {
+                let existing = node
+                    .properties
+                    .get_string("unresolved_type_refs")
+                    .unwrap_or("");
+                let mut all: Vec<&str> = if existing.is_empty() {
+                    Vec::new()
+                } else {
+                    existing.split(',').collect()
+                };
+                for t in &types {
+                    if !all.contains(&t.as_str()) {
+                        all.push(t);
+                    }
+                }
+                let new_props = node
+                    .properties
+                    .clone()
+                    .with("unresolved_type_refs", all.join(","));
+                let _ = graph.update_node_properties(referrer_id, new_props);
+            }
         }
     }
 

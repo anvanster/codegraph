@@ -77,6 +77,20 @@ impl<'a> TypeScriptVisitor<'a> {
                     self.visit_node(child);
                 }
             }
+            "new_expression" => {
+                self.visit_new_expression(node);
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            }
+            "as_expression" | "satisfies_expression" => {
+                self.visit_type_assertion(node);
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            }
             _ => {
                 // Recursively visit children for unhandled node types
                 let mut cursor = node.walk();
@@ -690,6 +704,82 @@ impl<'a> TypeScriptVisitor<'a> {
             };
 
             self.calls.push(call);
+        }
+    }
+
+    /// Visit a `new ClassName()` expression — record as a call to the class
+    /// and extract generic type arguments as type references.
+    fn visit_new_expression(&mut self, node: Node) {
+        let caller = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        // tree-sitter: new_expression → "new" keyword + constructor + type_arguments? + arguments
+        // Constructor is typically child index 1 (after "new" keyword)
+        if let Some(constructor) = node.child(1) {
+            let class_name = match constructor.kind() {
+                "identifier" => self.node_text(constructor),
+                "member_expression" => {
+                    // e.g., new vscode.TreeItem() → extract "TreeItem"
+                    constructor
+                        .child_by_field_name("property")
+                        .map(|p| self.node_text(p))
+                        .unwrap_or_default()
+                }
+                _ => return,
+            };
+
+            // Only treat PascalCase names as class instantiations
+            if !class_name.is_empty()
+                && class_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase())
+            {
+                self.calls.push(CallRelation {
+                    caller: caller.clone(),
+                    callee: class_name,
+                    call_site_line: node.start_position().row + 1,
+                    is_direct: true,
+                });
+            }
+        }
+
+        // Extract generic type arguments: new RequestType<ParamType>()
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "type_arguments" {
+                for type_name in self.extract_type_names(child) {
+                    self.type_references.push(TypeReference::new(
+                        caller.clone(),
+                        type_name,
+                        node.start_position().row + 1,
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Visit `as` casts and `satisfies` expressions — extract the type as a reference.
+    fn visit_type_assertion(&mut self, node: Node) {
+        let func_name = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        // tree-sitter: as_expression → expression "as" type
+        // satisfies_expression → expression "satisfies" type
+        // The type is typically the last meaningful child
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            for type_name in self.extract_type_names(child) {
+                self.type_references.push(TypeReference::new(
+                    func_name.clone(),
+                    type_name,
+                    node.start_position().row + 1,
+                ));
+            }
         }
     }
 
