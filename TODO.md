@@ -1,10 +1,15 @@
-Last updated: 2026-02-20
+Last updated: 2026-03-01
 
 # codegraph-monorepo TODO
 
 ## High Priority
 
-_(none — all items completed)_
+### 14. LSP `is_public` doesn't read parser `visibility` property
+- All 13 parsers store `visibility` as a string ("public"/"protected"/"private")
+- LSP server's `get_symbol_info` only checks boolean `is_public` or `exported`, defaults to `true`
+- Result: Python `_protected_function` and `__private_function` both show `is_public: true`
+- Fix: LSP should fall back to `visibility` string when `is_public` bool is absent
+- Affects: `engine.rs` lines 405-409, 989-991, and `node_to_symbol_info`
 
 ## Medium Priority
 
@@ -23,11 +28,12 @@ _(none — all items completed)_
 - Consider: upstream grammar fix, or switching to a maintained grammar fork
 - Collapsed word_list and fragmented body issues are handled but fragile
 
-### 12. Missing Calls edge extraction in Rust and Go parsers
-- Rust visitor has no `call_expression` handling — `.calls` vec is never populated
-- Go visitor has no call extraction at all — no `.calls.push` anywhere
-- C was fixed (visitor extracts, extractor transfers to `ir.calls`)
-- All other 10 parsers produce Calls edges correctly
+### 15. Remaining parser capability gaps
+- **TypeScript**: arrow functions stored as `arrow_function` instead of variable name (e.g., `fetchData`)
+- **C#, Java, Kotlin, Ruby, Swift, PHP**: no parameter extraction, no return type extraction
+- **C#, Java, PHP, Ruby, Swift**: no enum-as-class extraction
+- **Kotlin, Ruby, Swift**: no ABC/trait detection from class hierarchy
+- Use Rust parser as gold standard reference for feature parity
 
 ## Future
 
@@ -48,6 +54,18 @@ _(none — all items completed)_
 - Potential: SQLite for zero-config, PostgreSQL for multi-user
 
 ## Completed
+
+### ~~13. Align parser capabilities across TypeScript, Python, Go, and C++~~
+- TypeScript: enum extraction (as ClassEntity), arrow function async detection (`4384d7d`)
+- Python: enum detection from base classes, ABC/Protocol → TraitEntity, visibility from name prefixes
+- Go: parameter extraction (incl. variadic), return type, receiver type, visibility, test detection
+- C++: C++20 coroutine detection via co_await/co_return/co_yield and return type patterns
+- Versions bumped: TS 0.4.2, Python 0.4.3, Go 0.1.6, C++ 0.2.2
+
+### ~~12. Missing Calls edge extraction in Rust and Go parsers~~
+- Rust: added call_expression handling in visitor, including macro invocation bodies (`78fad1d`, `be9a66f`)
+- Go: added call extraction (`78fad1d`)
+- C: was already fixed separately
 
 ### ~~1. Fix codegraph-c `test_parse_syntax_error` test~~
 - Fixed: switched `parse_source()` from tolerant mode to strict `extract()`, matching other parsers
@@ -80,6 +98,7 @@ _(none — all items completed)_
 
 ## Workspace Health
 
-- **Total tests**: 1015 passing, 0 failing
+- **Total tests**: 1098 passing, 0 failing, 4 ignored
 - **Crates**: 15 (core + parser-api + 13 language parsers)
 - **Clippy**: clean
+- **Recent features**: cyclomatic complexity (all 13 parsers), TypeReference IR, cross-file type resolution
