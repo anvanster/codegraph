@@ -113,7 +113,8 @@ pub fn ir_to_graph(
             .with("signature", func.signature.clone())
             .with("line_start", func.line_start as i64)
             .with("line_end", func.line_end as i64)
-            .with("is_async", func.is_async);
+            .with("is_async", func.is_async)
+            .with("visibility", func.visibility.clone());
 
         // Add complexity metrics if available
         if let Some(ref complexity) = func.complexity {
@@ -165,7 +166,8 @@ pub fn ir_to_graph(
             .with("name", class.name.clone())
             .with("path", file_path.display().to_string())
             .with("line_start", class.line_start as i64)
-            .with("line_end", class.line_end as i64);
+            .with("line_end", class.line_end as i64)
+            .with("visibility", class.visibility.clone());
 
         let class_id = graph
             .add_node(NodeType::Class, props)
@@ -185,7 +187,8 @@ pub fn ir_to_graph(
             .with("name", interface.name.clone())
             .with("path", file_path.display().to_string())
             .with("line_start", interface.line_start as i64)
-            .with("line_end", interface.line_end as i64);
+            .with("line_end", interface.line_end as i64)
+            .with("visibility", interface.visibility.clone());
 
         let trait_id = graph
             .add_node(NodeType::Interface, props)
@@ -1105,6 +1108,11 @@ mod tests {
             ),
             "is_async should be Bool(true), got {:?}",
             func_node.properties.get("is_async")
+        );
+        assert_eq!(
+            func_node.properties.get_string("visibility"),
+            Some("public"),
+            "visibility should be 'public'"
         );
     }
 }

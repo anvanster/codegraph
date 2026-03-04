@@ -624,6 +624,68 @@ function hello(): void {
 }
 
 #[test]
+fn test_method_visibility() {
+    let source = r#"
+class MyClass {
+    private secret(): void {}
+    protected internal(): string { return ""; }
+    public visible(): number { return 1; }
+    implicit(): boolean { return true; }
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = TypeScriptParser::new();
+
+    let result = parser.parse_source(source, Path::new("test.ts"), &mut graph);
+    assert!(result.is_ok());
+
+    let info = result.unwrap();
+    assert_eq!(info.classes.len(), 1);
+
+    // Get all function nodes and check their visibility property
+    let func_ids = graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap();
+
+    let mut visibilities: Vec<(String, String)> = func_ids
+        .iter()
+        .filter_map(|&id| {
+            let node = graph.get_node(id).ok()?;
+            let name = node.properties.get_string("name")?.to_string();
+            let vis = node.properties.get_string("visibility")?.to_string();
+            Some((name, vis))
+        })
+        .collect();
+    visibilities.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Verify each method has the correct visibility
+    assert!(
+        visibilities
+            .iter()
+            .any(|(n, v)| n == "secret" && v == "private"),
+        "secret should be private, got: {:?}",
+        visibilities
+    );
+    assert!(
+        visibilities
+            .iter()
+            .any(|(n, v)| n == "internal" && v == "protected"),
+        "internal should be protected, got: {:?}",
+        visibilities
+    );
+    assert!(
+        visibilities
+            .iter()
+            .any(|(n, v)| n == "visible" && v == "public"),
+        "visible should be public, got: {:?}",
+        visibilities
+    );
+}
+
+#[test]
 fn test_triple_slash_types_reference_not_captured() {
     let source = r#"/// <reference types="node" />
 /// This is a regular comment
