@@ -41,12 +41,11 @@ pub fn extract_decorators(source: &[u8], node: Node) -> Vec<String> {
 
     for child in node.children(&mut cursor) {
         if child.kind() == "decorator" {
-            let text = child.utf8_text(source).unwrap_or("");
-            // Handle @decorator and @decorator(args) patterns
-            let name = text.trim_start_matches('@');
-            // Get just the decorator name (before any parentheses)
-            let name = name.split('(').next().unwrap_or(name);
-            decorators.push(format!("@{}", name.trim()));
+            let text = child.utf8_text(source).unwrap_or("").trim();
+            // Preserve full decorator text including arguments for route detection.
+            // e.g., "@app.get(\"/users\")" stays as-is rather than truncating to "@app.get"
+            let name = text.trim_start_matches('@').trim();
+            decorators.push(format!("@{name}"));
         }
     }
 

@@ -70,6 +70,8 @@ pub enum EdgeType {
     Defines,
     /// Generic reference
     References,
+    /// Runtime dependency (e.g., HTTP client call → route handler)
+    RuntimeCalls,
 }
 
 impl std::fmt::Display for EdgeType {
@@ -86,6 +88,7 @@ impl std::fmt::Display for EdgeType {
             EdgeType::Uses => write!(f, "Uses"),
             EdgeType::Defines => write!(f, "Defines"),
             EdgeType::References => write!(f, "References"),
+            EdgeType::RuntimeCalls => write!(f, "RuntimeCalls"),
         }
     }
 }

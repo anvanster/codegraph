@@ -59,4 +59,4 @@ pub use graph::{
     PropertyValue,
 };
 pub use query::QueryBuilder;
-pub use storage::{MemoryBackend, RocksDBBackend, StorageBackend};
+pub use storage::{MemoryBackend, NamespacedBackend, RocksDBBackend, StorageBackend};

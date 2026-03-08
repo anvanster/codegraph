@@ -11,9 +11,11 @@
 //! - **Fail Fast**: Operations return errors immediately, no silent failures
 
 mod memory;
+mod namespaced;
 mod rocksdb_backend;
 
 pub use memory::MemoryBackend;
+pub use namespaced::NamespacedBackend;
 pub use rocksdb_backend::RocksDBBackend;
 
 use crate::error::Result;

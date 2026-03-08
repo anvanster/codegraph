@@ -582,6 +582,76 @@ impl CodeGraph {
         self.flush()
     }
 
+    /// Detach the persistent storage backend, switching to in-memory operation.
+    ///
+    /// Flushes all pending writes, then replaces the storage backend with a no-op
+    /// [`MemoryBackend`]. This releases any database locks (e.g., RocksDB) while
+    /// keeping all data accessible via in-memory caches.
+    ///
+    /// After detaching, new writes (add_node, add_edge) go to the in-memory backend
+    /// and are NOT persisted. Use [`persist_to`](Self::persist_to) to write back to disk.
+    pub fn detach_storage(&mut self) -> Result<()> {
+        self.save_counters()?;
+        self.storage.flush()?;
+        self.storage = Box::new(crate::storage::MemoryBackend::new());
+        info!("Storage detached — operating in memory-only mode");
+        Ok(())
+    }
+
+    /// Persist all in-memory data to a storage backend.
+    ///
+    /// Opens the given backend, writes all nodes, edges, and counters,
+    /// then drops the backend (releasing locks). The graph continues
+    /// operating with its current (in-memory) backend.
+    pub fn persist_to(&self, mut backend: Box<dyn StorageBackend>) -> Result<()> {
+        info!(
+            "Persisting {} nodes and {} edges to storage",
+            self.nodes.len(),
+            self.edges.len()
+        );
+
+        // Build batch of all nodes and edges
+        let mut operations = Vec::with_capacity(self.nodes.len() + self.edges.len() + 1);
+
+        for (&id, node) in &self.nodes {
+            let key = format!("node:{id}");
+            let value = serde_json::to_vec(node)
+                .map_err(|e| GraphError::serialization("Failed to serialize node", Some(e)))?;
+            operations.push(crate::storage::BatchOperation::Put {
+                key: key.into_bytes(),
+                value,
+            });
+        }
+
+        for (&id, edge) in &self.edges {
+            let key = format!("edge:{id}");
+            let value = serde_json::to_vec(edge)
+                .map_err(|e| GraphError::serialization("Failed to serialize edge", Some(e)))?;
+            operations.push(crate::storage::BatchOperation::Put {
+                key: key.into_bytes(),
+                value,
+            });
+        }
+
+        // Write counters
+        let counters = serde_json::json!({
+            "node_counter": self.node_counter,
+            "edge_counter": self.edge_counter,
+        });
+        let counter_value = serde_json::to_vec(&counters)
+            .map_err(|e| GraphError::serialization("Failed to serialize counters", Some(e)))?;
+        operations.push(crate::storage::BatchOperation::Put {
+            key: b"meta:counters".to_vec(),
+            value: counter_value,
+        });
+
+        backend.write_batch(operations)?;
+        backend.flush()?;
+
+        info!("Persist complete");
+        Ok(())
+    }
+
     // Private helper methods
 
     fn next_node_id(&mut self) -> NodeId {
