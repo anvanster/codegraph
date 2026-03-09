@@ -10,9 +10,13 @@ readme = "../../README.md"
 keywords = ["graph", "code-analysis", "database", "ast", "relationships"]
 categories = ["database-implementations", "data-structures", "development-tools"]
 
+[features]
+default = ["rocksdb-backend"]
+rocksdb-backend = ["dep:rocksdb"]
+
 [dependencies]
 # Storage backend
-rocksdb.workspace = true
+rocksdb = { workspace = true, optional = true }
 
 # Serialization
 serde.workspace = true

@@ -6,6 +6,7 @@ use crate::error::{GraphError, Result};
 use crate::storage::StorageBackend;
 use log::{debug, info, trace};
 use std::collections::{HashMap, HashSet};
+#[cfg(feature = "rocksdb-backend")]
 use std::path::Path;
 
 /// The main code graph database.
@@ -66,6 +67,7 @@ impl CodeGraph {
     /// # Errors
     ///
     /// Returns [`GraphError::Storage`] if the database cannot be opened.
+    #[cfg(feature = "rocksdb-backend")]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         use crate::storage::RocksDBBackend;
         info!("Opening graph at path: {:?}", path.as_ref());

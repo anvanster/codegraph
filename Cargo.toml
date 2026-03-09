@@ -35,7 +35,7 @@ log = "0.4"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Internal crates
-codegraph = { path = "crates/codegraph", version = "0.2.0" }
+codegraph = { path = "crates/codegraph", version = "0.2.0", default-features = false }
 codegraph-parser-api = { path = "crates/codegraph-parser-api", version = "0.2.1" }
 
 [profile.release]

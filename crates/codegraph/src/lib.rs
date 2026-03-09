@@ -59,4 +59,6 @@ pub use graph::{
     PropertyValue,
 };
 pub use query::QueryBuilder;
-pub use storage::{MemoryBackend, NamespacedBackend, RocksDBBackend, StorageBackend};
+pub use storage::{MemoryBackend, NamespacedBackend, StorageBackend};
+#[cfg(feature = "rocksdb-backend")]
+pub use storage::RocksDBBackend;

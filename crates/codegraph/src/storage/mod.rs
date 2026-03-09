@@ -12,10 +12,12 @@
 
 mod memory;
 mod namespaced;
+#[cfg(feature = "rocksdb-backend")]
 mod rocksdb_backend;
 
 pub use memory::MemoryBackend;
 pub use namespaced::NamespacedBackend;
+#[cfg(feature = "rocksdb-backend")]
 pub use rocksdb_backend::RocksDBBackend;
 
 use crate::error::Result;
