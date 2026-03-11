@@ -238,7 +238,7 @@ pub fn ir_to_graph(
             edge_props = edge_props.with("is_wildcard", "true");
         }
         if !import.symbols.is_empty() {
-            edge_props = edge_props.with("symbols", import.symbols.join(","));
+            edge_props = edge_props.with("symbols", import.symbols.clone());
         }
 
         // Store resolved path for cross-file resolution
@@ -327,22 +327,19 @@ pub fn ir_to_graph(
     for (caller_name, callees) in unresolved_calls {
         if let Some(&caller_id) = node_map.get(&caller_name) {
             if let Ok(node) = graph.get_node(caller_id) {
-                // Get existing unresolved_calls or create new
-                let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
-                let mut all_callees: Vec<&str> = if existing.is_empty() {
-                    Vec::new()
-                } else {
-                    existing.split(',').collect()
-                };
+                let mut all_callees: Vec<String> = node
+                    .properties
+                    .get_string_list_compat("unresolved_calls")
+                    .unwrap_or_default();
                 for callee in &callees {
-                    if !all_callees.contains(&callee.as_str()) {
-                        all_callees.push(callee);
+                    if !all_callees.iter().any(|c| c == callee) {
+                        all_callees.push(callee.clone());
                     }
                 }
                 let new_props = node
                     .properties
                     .clone()
-                    .with("unresolved_calls", all_callees.join(","));
+                    .with("unresolved_calls", all_callees);
                 let _ = graph.update_node_properties(caller_id, new_props);
             }
         }
@@ -391,24 +388,16 @@ pub fn ir_to_graph(
     for (referrer_name, types) in unresolved_type_refs {
         if let Some(&referrer_id) = node_map.get(&referrer_name) {
             if let Ok(node) = graph.get_node(referrer_id) {
-                let existing = node
+                let mut all: Vec<String> = node
                     .properties
-                    .get_string("unresolved_type_refs")
-                    .unwrap_or("");
-                let mut all: Vec<&str> = if existing.is_empty() {
-                    Vec::new()
-                } else {
-                    existing.split(',').collect()
-                };
+                    .get_string_list_compat("unresolved_type_refs")
+                    .unwrap_or_default();
                 for t in &types {
-                    if !all.contains(&t.as_str()) {
-                        all.push(t);
+                    if !all.iter().any(|existing| existing == t) {
+                        all.push(t.clone());
                     }
                 }
-                let new_props = node
-                    .properties
-                    .clone()
-                    .with("unresolved_type_refs", all.join(","));
+                let new_props = node.properties.clone().with("unresolved_type_refs", all);
                 let _ = graph.update_node_properties(referrer_id, new_props);
             }
         }

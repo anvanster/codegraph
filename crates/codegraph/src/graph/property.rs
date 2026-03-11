@@ -172,6 +172,21 @@ impl PropertyMap {
         }
     }
 
+    /// Get a string list with backwards compatibility for comma-separated strings.
+    ///
+    /// Returns the `StringList` value if present, otherwise splits a `String` value
+    /// by commas. This supports reading properties from graphs built before the
+    /// migration from comma-separated strings to `StringList`.
+    pub fn get_string_list_compat(&self, key: &str) -> Option<Vec<String>> {
+        match self.data.get(key) {
+            Some(PropertyValue::StringList(list)) => Some(list.clone()),
+            Some(PropertyValue::String(s)) if !s.is_empty() => {
+                Some(s.split(',').map(|s| s.trim().to_string()).collect())
+            }
+            _ => None,
+        }
+    }
+
     /// Type-safe getter for integer list properties.
     pub fn get_int_list(&self, key: &str) -> Option<&[i64]> {
         match self.data.get(key) {
@@ -276,5 +291,31 @@ mod tests {
 
         assert_eq!(props.get_string_list("symbols").map(|s| s.len()), Some(2));
         assert_eq!(props.get_int_list("lines").map(|l| l.len()), Some(3));
+    }
+
+    #[test]
+    fn test_get_string_list_compat() {
+        // StringList variant works directly
+        let props = PropertyMap::new().with("symbols", vec!["foo".to_string(), "bar".to_string()]);
+        let result = props.get_string_list_compat("symbols").unwrap();
+        assert_eq!(result, vec!["foo", "bar"]);
+
+        // Comma-separated String is split
+        let props = PropertyMap::new().with("symbols", "foo,bar,baz");
+        let result = props.get_string_list_compat("symbols").unwrap();
+        assert_eq!(result, vec!["foo", "bar", "baz"]);
+
+        // Whitespace around commas is trimmed
+        let props = PropertyMap::new().with("symbols", "foo, bar , baz");
+        let result = props.get_string_list_compat("symbols").unwrap();
+        assert_eq!(result, vec!["foo", "bar", "baz"]);
+
+        // Empty string returns None
+        let props = PropertyMap::new().with("symbols", "");
+        assert!(props.get_string_list_compat("symbols").is_none());
+
+        // Missing key returns None
+        let props = PropertyMap::new();
+        assert!(props.get_string_list_compat("symbols").is_none());
     }
 }

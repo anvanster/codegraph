@@ -305,9 +305,12 @@ def decorated_func():
     assert_eq!(func_ids.len(), 1);
     let node = graph.get_node(func_ids[0]).unwrap();
     assert_eq!(node.properties.get_string("name"), Some("decorated_func"));
-    let attrs = node.properties.get_string("attributes").unwrap();
+    let attrs = node
+        .properties
+        .get_string_list("attributes")
+        .expect("attributes should be a StringList");
     assert!(
-        attrs.contains("property"),
+        attrs.iter().any(|a| a.contains("property")),
         "Expected @property decorator in attributes, got: {:?}",
         attrs
     );

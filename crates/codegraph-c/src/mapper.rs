@@ -222,21 +222,19 @@ pub fn ir_to_graph(
     for (caller_name, callees) in unresolved_calls {
         if let Some(&caller_id) = node_map.get(&caller_name) {
             if let Ok(node) = graph.get_node(caller_id) {
-                let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
-                let mut all_callees: Vec<&str> = if existing.is_empty() {
-                    Vec::new()
-                } else {
-                    existing.split(',').collect()
-                };
+                let mut all_callees: Vec<String> = node
+                    .properties
+                    .get_string_list_compat("unresolved_calls")
+                    .unwrap_or_default();
                 for callee in &callees {
-                    if !all_callees.contains(&callee.as_str()) {
-                        all_callees.push(callee);
+                    if !all_callees.iter().any(|c| c == callee) {
+                        all_callees.push(callee.clone());
                     }
                 }
                 let new_props = node
                     .properties
                     .clone()
-                    .with("unresolved_calls", all_callees.join(","));
+                    .with("unresolved_calls", all_callees);
                 let _ = graph.update_node_properties(caller_id, new_props);
             }
         }

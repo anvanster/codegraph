@@ -117,7 +117,7 @@ impl PythonParser {
                 .with("is_async", func.is_async)
                 .with("is_static", func.is_static)
                 .with("is_test", func.is_test)
-                .with("attributes", func.attributes.join(","));
+                .with("attributes", func.attributes.clone());
 
             if let Some(ref doc) = func.doc_comment {
                 props = props.with("doc", doc.clone());
@@ -236,7 +236,7 @@ impl PythonParser {
                 edge_props = edge_props.with("is_wildcard", "true");
             }
             if !import.symbols.is_empty() {
-                edge_props = edge_props.with("symbols", import.symbols.join(","));
+                edge_props = edge_props.with("symbols", import.symbols.clone());
             }
             graph
                 .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
@@ -273,21 +273,19 @@ impl PythonParser {
         for (caller_name, callees) in unresolved_calls {
             if let Some(&caller_id) = node_map.get(&caller_name) {
                 if let Ok(node) = graph.get_node(caller_id) {
-                    let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
-                    let mut all_callees: Vec<&str> = if existing.is_empty() {
-                        Vec::new()
-                    } else {
-                        existing.split(',').collect()
-                    };
+                    let mut all_callees: Vec<String> = node
+                        .properties
+                        .get_string_list_compat("unresolved_calls")
+                        .unwrap_or_default();
                     for callee in &callees {
-                        if !all_callees.contains(&callee.as_str()) {
-                            all_callees.push(callee);
+                        if !all_callees.iter().any(|c| c == callee) {
+                            all_callees.push(callee.clone());
                         }
                     }
                     let new_props = node
                         .properties
                         .clone()
-                        .with("unresolved_calls", all_callees.join(","));
+                        .with("unresolved_calls", all_callees);
                     let _ = graph.update_node_properties(caller_id, new_props);
                 }
             }

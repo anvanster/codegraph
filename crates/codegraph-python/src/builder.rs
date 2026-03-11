@@ -36,7 +36,7 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
             .with("is_async", func.is_async)
             .with("is_static", func.is_static)
             .with("is_test", func.is_test)
-            .with("attributes", func.attributes.join(","));
+            .with("attributes", func.attributes.clone());
 
         // Add complexity metrics if available
         if let Some(ref complexity) = func.complexity {
@@ -136,7 +136,7 @@ pub fn build_graph(graph: &mut CodeGraph, ir: &CodeIR, file_path: &str) -> Resul
             edge_props = edge_props.with("is_wildcard", "true");
         }
         if !import.symbols.is_empty() {
-            edge_props = edge_props.with("symbols", import.symbols.join(","));
+            edge_props = edge_props.with("symbols", import.symbols.clone());
         }
         graph
             .add_edge(file_id, import_id, EdgeType::Imports, edge_props)

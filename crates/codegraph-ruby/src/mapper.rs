@@ -76,7 +76,7 @@ pub fn ir_to_graph(
         }
         if !func.parameters.is_empty() {
             let param_names: Vec<String> = func.parameters.iter().map(|p| p.name.clone()).collect();
-            props = props.with("parameters", param_names.join(","));
+            props = props.with("parameters", param_names);
         }
         if let Some(ref complexity) = func.complexity {
             props = props
@@ -131,7 +131,7 @@ pub fn ir_to_graph(
             props = props.with("doc", doc.clone());
         }
         if !class.attributes.is_empty() {
-            props = props.with("attributes", class.attributes.join(","));
+            props = props.with("attributes", class.attributes.clone());
         }
 
         let class_id = graph
@@ -195,7 +195,7 @@ pub fn ir_to_graph(
                 .iter()
                 .map(|m| m.name.clone())
                 .collect();
-            props = props.with("required_methods", method_names.join(","));
+            props = props.with("required_methods", method_names);
         }
 
         let trait_id = graph
@@ -243,7 +243,7 @@ pub fn ir_to_graph(
             edge_props = edge_props.with("is_wildcard", "true");
         }
         if !import.symbols.is_empty() {
-            edge_props = edge_props.with("symbols", import.symbols.join(","));
+            edge_props = edge_props.with("symbols", import.symbols.clone());
         }
         graph
             .add_edge(file_id, import_id, EdgeType::Imports, edge_props)
@@ -276,21 +276,19 @@ pub fn ir_to_graph(
     for (caller_name, callees) in unresolved_calls {
         if let Some(&caller_id) = node_map.get(&caller_name) {
             if let Ok(node) = graph.get_node(caller_id) {
-                let existing = node.properties.get_string("unresolved_calls").unwrap_or("");
-                let mut all_callees: Vec<&str> = if existing.is_empty() {
-                    Vec::new()
-                } else {
-                    existing.split(',').collect()
-                };
+                let mut all_callees: Vec<String> = node
+                    .properties
+                    .get_string_list_compat("unresolved_calls")
+                    .unwrap_or_default();
                 for callee in &callees {
-                    if !all_callees.contains(&callee.as_str()) {
-                        all_callees.push(callee);
+                    if !all_callees.iter().any(|c| c == callee) {
+                        all_callees.push(callee.clone());
                     }
                 }
                 let new_props = node
                     .properties
                     .clone()
-                    .with("unresolved_calls", all_callees.join(","));
+                    .with("unresolved_calls", all_callees);
                 let _ = graph.update_node_properties(caller_id, new_props);
             }
         }
