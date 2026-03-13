@@ -88,15 +88,12 @@ impl<'a> CVisitor<'a> {
                 self.visit_node(child);
             }
         } else {
-            // For function definitions, only recurse into the body for calls
-            // but not for other top-level entities
+            // For function definitions, only recurse into the non-body children
+            // (call extraction is handled inside visit_function while current_function is set)
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() != "compound_statement" {
                     self.visit_node(child);
-                } else if self.extract_calls {
-                    // Visit body for call extraction
-                    self.visit_node_for_calls(child);
                 }
             }
         }
@@ -104,11 +101,9 @@ impl<'a> CVisitor<'a> {
 
     /// Visit nodes specifically for call extraction (doesn't extract entities)
     fn visit_node_for_calls(&mut self, node: Node) {
-        if node.is_error() {
-            return;
-        }
-
-        if node.kind() == "call_expression" {
+        // For ERROR nodes, still recurse into children to extract valid calls
+        // within partially-parsed regions (common in macro-heavy kernel code)
+        if !node.is_error() && node.kind() == "call_expression" {
             self.visit_call(node);
         }
 
@@ -219,6 +214,13 @@ impl<'a> CVisitor<'a> {
         };
 
         self.functions.push(func);
+
+        // Extract calls from function body while current_function is still set
+        if self.extract_calls {
+            if let Some(body) = node.child_by_field_name("body") {
+                self.visit_node_for_calls(body);
+            }
+        }
 
         // Restore previous function context
         self.current_function = prev_function;
@@ -618,58 +620,54 @@ impl<'a> CVisitor<'a> {
     }
 
     fn visit_for_complexity(&self, node: Node, builder: &mut ComplexityBuilder) {
-        match node.kind() {
-            "if_statement" => {
-                builder.add_branch();
-                builder.enter_scope();
-            }
-            "else_clause" => {
-                builder.add_branch();
-            }
-            "for_statement" => {
-                builder.add_loop();
-                builder.enter_scope();
-            }
-            "while_statement" => {
-                builder.add_loop();
-                builder.enter_scope();
-            }
-            "do_statement" => {
-                builder.add_loop();
-                builder.enter_scope();
-            }
-            "switch_statement" => {
-                builder.enter_scope();
-            }
-            "case_statement" => {
-                builder.add_branch();
-            }
-            "default_statement" => {
-                builder.add_branch();
-            }
-            "conditional_expression" => {
-                // Ternary operator ?:
-                builder.add_branch();
-            }
-            "goto_statement" => {
-                // C-specific: goto adds complexity
-                builder.add_branch();
-            }
-            "binary_expression" => {
-                // Check for && and ||
-                if let Some(op) = node.child_by_field_name("operator") {
-                    let op_text = self.node_text(op);
-                    if op_text == "&&" || op_text == "||" {
-                        builder.add_logical_operator();
+        // Recurse through ERROR nodes to count complexity in partially-parsed regions
+        if !node.is_error() {
+            match node.kind() {
+                "if_statement" => {
+                    builder.add_branch();
+                    builder.enter_scope();
+                }
+                "else_clause" => {
+                    builder.add_branch();
+                }
+                "for_statement" => {
+                    builder.add_loop();
+                    builder.enter_scope();
+                }
+                "while_statement" => {
+                    builder.add_loop();
+                    builder.enter_scope();
+                }
+                "do_statement" => {
+                    builder.add_loop();
+                    builder.enter_scope();
+                }
+                "switch_statement" => {
+                    builder.enter_scope();
+                }
+                "case_statement" => {
+                    builder.add_branch();
+                }
+                "default_statement" => {
+                    builder.add_branch();
+                }
+                "conditional_expression" => {
+                    builder.add_branch();
+                }
+                "goto_statement" => {
+                    builder.add_branch();
+                }
+                "binary_expression" => {
+                    if let Some(op) = node.child_by_field_name("operator") {
+                        let op_text = self.node_text(op);
+                        if op_text == "&&" || op_text == "||" {
+                            builder.add_logical_operator();
+                        }
                     }
                 }
+                "return_statement" => {}
+                _ => {}
             }
-            "return_statement" => {
-                // Early return detection (not at the end of function)
-                // For now, count all returns except the last one would require more context
-                // Simplified: just count as potential early return
-            }
-            _ => {}
         }
 
         let mut cursor = node.walk();
@@ -677,13 +675,15 @@ impl<'a> CVisitor<'a> {
             self.visit_for_complexity(child, builder);
         }
 
-        // Exit scope for control structures
-        match node.kind() {
-            "if_statement" | "for_statement" | "while_statement" | "do_statement"
-            | "switch_statement" => {
-                builder.exit_scope();
+        // Exit scope for control structures (only for non-error nodes)
+        if !node.is_error() {
+            match node.kind() {
+                "if_statement" | "for_statement" | "while_statement" | "do_statement"
+                | "switch_statement" => {
+                    builder.exit_scope();
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 }
@@ -914,5 +914,26 @@ mod tests {
         let small = enum_entity.fields.iter().find(|f| f.name == "SMALL");
         assert!(small.is_some());
         assert_eq!(small.unwrap().default_value, Some("1".to_string()));
+    }
+
+    #[test]
+    fn test_vmk_complexity_computed_correctly() {
+        // Test the EXACT path: parse → visitor → complexity
+        let source = b"VMK_ReturnStatus\nirndrv_RDMAOpGetPrivStats(vmk_AddrCookie driverData, char *statBuf,\n                          vmk_ByteCount length)\n{\n   irndrv_Pf *pf = (irndrv_Pf *)driverData.ptr;\n   vmk_ByteCount outLen;\n   VMK_ReturnStatus status;\n\n   if (length < 100) {\n      return VMK_BAD_PARAM;\n   }\n\n   for (int i = 0; i < 10; i++) {\n      vmk_Memset(statBuf, 0, length);\n   }\n\n   while (status != 0) {\n      status = vmk_AtomicRead16(&flag);\n   }\n\n   return VMK_OK;\n}\n";
+
+        let visitor = parse_and_visit(source);
+        assert_eq!(visitor.functions.len(), 1);
+        let func = &visitor.functions[0];
+        println!("name={} complexity={:?}", func.name, func.complexity);
+        let cx = func.complexity.as_ref().expect("should have complexity");
+        println!(
+            "  cyclomatic={} branches={} loops={}",
+            cx.cyclomatic_complexity, cx.branches, cx.loops
+        );
+        assert!(
+            cx.cyclomatic_complexity > 1,
+            "Expected complexity > 1, got {}",
+            cx.cyclomatic_complexity
+        );
     }
 }

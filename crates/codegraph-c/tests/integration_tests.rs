@@ -311,7 +311,8 @@ int broken( {
     let parser = CParser::new();
     let result = parser.parse_source(source, Path::new("broken.c"), &mut graph);
 
-    assert!(result.is_err());
+    // Tolerant fallback means partial files still parse successfully
+    assert!(result.is_ok());
 }
 
 #[test]
@@ -1183,4 +1184,199 @@ struct Data *returns_struct_ptr(void) { return NULL; }
     let return_type = node.properties.get_string("return_type");
     assert!(return_type.is_some());
     assert_eq!(return_type.unwrap(), "void");
+}
+
+#[test]
+fn test_vmk_driver_function_parsing() {
+    let source = r#"
+VMK_ReturnStatus
+irndrv_RDMAOpGetPrivStats(
+    vmk_AddrCookie driverData,
+    vmk_ByteCount length)
+{
+    VMK_ReturnStatus status;
+    vmk_uint32 count = 0;
+
+    if (length > 100) {
+        for (int i = 0; i < count; i++) {
+            vmk_StringFormat(buffer, sizeof(buffer), "test");
+        }
+        vmk_Memset(buffer, 0, sizeof(buffer));
+    } else if (count > 0) {
+        vmk_Warning("bad count");
+    }
+
+    switch (count) {
+        case 0:
+            break;
+        case 1:
+            return VMK_FAILURE;
+        default:
+            break;
+    }
+
+    while (status != 0) {
+        status = vmk_AtomicRead16(&flag);
+    }
+
+    return VMK_OK;
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let result = parser
+        .parse_source(source, Path::new("test_vmk.c"), &mut graph)
+        .expect("should parse");
+
+    println!("Functions found: {}", result.functions.len());
+    assert!(
+        !result.functions.is_empty(),
+        "Should find at least one function"
+    );
+
+    // Query functions from graph
+    let func_ids = graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap();
+
+    // Find our function
+    let func_node = func_ids
+        .iter()
+        .filter_map(|id| {
+            let node = graph.get_node(*id).ok()?;
+            let name = node.properties.get_string("name")?;
+            if name == "irndrv_RDMAOpGetPrivStats" {
+                Some(node.clone())
+            } else {
+                None
+            }
+        })
+        .next()
+        .expect("Should find irndrv_RDMAOpGetPrivStats");
+
+    let complexity = func_node
+        .properties
+        .get_int("cyclomatic_complexity")
+        .unwrap_or(0);
+    let branches = func_node.properties.get_int("branches").unwrap_or(0);
+    let loops = func_node.properties.get_int("loops").unwrap_or(0);
+
+    println!(
+        "  complexity={}, branches={}, loops={}",
+        complexity, branches, loops
+    );
+
+    assert!(
+        complexity > 1,
+        "Expected complexity > 1, got {}",
+        complexity
+    );
+    assert!(branches > 0, "Expected branches > 0, got {}", branches);
+    assert!(loops > 0, "Expected loops > 0, got {}", loops);
+}
+
+#[test]
+fn test_vmk_driver_with_custom_types() {
+    // Realistic test: VMK types + unknown project types (irndrv_Pf etc.)
+    let source = r#"
+#include "irndrv_common.h"
+
+#define RETRYCNT_BOUNDARY 7
+
+VMK_ReturnStatus
+irndrv_RDMAOpGetPrivStats(vmk_AddrCookie driverData, char *statBuf,
+                          vmk_ByteCount length)
+{
+   irndrv_Pf                 *pf = (irndrv_Pf *)driverData.ptr;
+   irndrv_rdmaDevice         *rdmaDevice = &pf->rdmaDevice;
+   struct irdma_pci_f        *rf = rdmaDevice->rf;
+   vmk_ByteCount             outLen;
+   VMK_ReturnStatus          status;
+   vmk_ByteCount             index = 0;
+
+   if (length < 100) {
+      return VMK_BAD_PARAM;
+   }
+
+   if (vmk_AtomicRead16(&pf->state) & 0xFF) {
+      vmk_Warning(log, "Device unavailable");
+      return VMK_FAILURE;
+   }
+
+   vmk_Memset(statBuf, 0, length);
+
+   status = vmk_StringFormat(statBuf, length - index, &outLen, "stats");
+   if (status != VMK_OK) {
+      return status;
+   }
+   index += outLen;
+
+   for (int i = 0; i < 10; i++) {
+      vmk_StringFormat(statBuf + index, length - index, &outLen, "%d", i);
+      index += outLen;
+   }
+
+   while (index < length) {
+      statBuf[index] = 0;
+      index++;
+   }
+
+   return VMK_OK;
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let result = parser
+        .parse_source(source, Path::new("test_vmk.c"), &mut graph)
+        .expect("should parse");
+
+    println!("Functions found: {}", result.functions.len());
+    assert!(!result.functions.is_empty(), "Should find at least one function");
+
+    let func_ids = graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap();
+
+    let func_node = func_ids
+        .iter()
+        .filter_map(|id| {
+            let node = graph.get_node(*id).ok()?;
+            let name = node.properties.get_string("name")?;
+            if name == "irndrv_RDMAOpGetPrivStats" {
+                Some(node.clone())
+            } else {
+                None
+            }
+        })
+        .next()
+        .expect("Should find irndrv_RDMAOpGetPrivStats");
+
+    let complexity = func_node
+        .properties
+        .get_int("cyclomatic_complexity")
+        .unwrap_or(0);
+    let branches = func_node.properties.get_int("branches").unwrap_or(0);
+    let loops = func_node.properties.get_int("loops").unwrap_or(0);
+
+    println!(
+        "  complexity={}, branches={}, loops={}",
+        complexity, branches, loops
+    );
+
+    // With unknown custom types (irndrv_Pf etc.) in the body, tree-sitter
+    // will have ERROR nodes, but our visitor should still find the
+    // if/for/while statements inside them.
+    assert!(
+        complexity > 1,
+        "Expected complexity > 1 even with unknown custom types, got {}",
+        complexity
+    );
+    assert!(branches > 0, "Expected branches > 0, got {}", branches);
+    assert!(loops > 0, "Expected loops > 0, got {}", loops);
 }

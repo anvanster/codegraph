@@ -111,7 +111,16 @@ impl CodeParser for CParser {
     ) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
 
-        let ir = extractor::extract(source, file_path, &self.config)?;
+        // Try strict mode first; on syntax errors, retry with tolerant mode
+        let ir = match extractor::extract(source, file_path, &self.config) {
+            Ok(ir) => ir,
+            Err(ParserError::SyntaxError(..)) => {
+                let options = extractor::ExtractionOptions::for_kernel_code();
+                let result = extractor::extract_with_options(source, file_path, &options)?;
+                result.ir
+            }
+            Err(e) => return Err(e),
+        };
 
         let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
 

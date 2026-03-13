@@ -288,6 +288,69 @@ impl CPreprocessor {
             self.type_macros
                 .insert(macro_name.to_string(), expansion.to_string());
         }
+
+        // VMware ESX / VMKernel types — these appear as return types and parameter
+        // types in ESX driver code and must be recognized as types by tree-sitter
+        for (macro_name, expansion) in [
+            // VMK return status and basic types
+            ("VMK_ReturnStatus", "int"),
+            ("vmk_Bool", "_Bool"),
+            ("vmk_ByteCount", "unsigned long"),
+            ("vmk_ByteCountSmall", "unsigned int"),
+            // VMK integer types
+            ("vmk_uint8", "unsigned char"),
+            ("vmk_uint16", "unsigned short"),
+            ("vmk_uint32", "unsigned int"),
+            ("vmk_uint64", "unsigned long long"),
+            ("vmk_int8", "signed char"),
+            ("vmk_int16", "signed short"),
+            ("vmk_int32", "signed int"),
+            ("vmk_int64", "signed long long"),
+            // VMK atomic types
+            ("vmk_atomic8", "unsigned char"),
+            ("vmk_atomic16", "unsigned short"),
+            ("vmk_atomic32", "unsigned int"),
+            ("vmk_atomic64", "unsigned long long"),
+            // VMK handle/cookie types
+            ("vmk_AddrCookie", "void*"),
+            ("vmk_HeapID", "void*"),
+            ("vmk_IntrCookie", "void*"),
+            ("vmk_Lock", "void*"),
+            ("vmk_Mutex", "void*"),
+            ("vmk_Semaphore", "void*"),
+            ("vmk_SpinlockIRQ", "void*"),
+            ("vmk_LockDomainID", "void*"),
+            ("vmk_ModuleID", "void*"),
+            ("vmk_TimerCookie", "void*"),
+            ("vmk_WorldID", "unsigned long"),
+            // VMK device/driver types
+            ("vmk_Device", "void*"),
+            ("vmk_Driver", "void*"),
+            ("vmk_DMAEngine", "void*"),
+            ("vmk_DMADirection", "int"),
+            ("vmk_IOA", "void*"),
+            // VMK network types
+            ("vmk_EthAddress", "unsigned char[6]"),
+            ("vmk_PktHandle", "void*"),
+            ("vmk_Uplink", "void*"),
+            ("vmk_UplinkSharedData", "void*"),
+            ("vmk_UplinkSharedQueueData", "void*"),
+            ("vmk_VlanID", "unsigned short"),
+            ("vmk_SwitchPortID", "void*"),
+            // VMK list/vector types
+            ("vmk_ListLinks", "void*"),
+            ("vmk_BitVector", "void*"),
+            // VMK misc types
+            ("vmk_Name", "char[32]"),
+            ("vmk_VA", "unsigned long"),
+            ("vmk_MA", "unsigned long long"),
+            ("vmk_LogComponent", "void*"),
+            ("vmk_Helper", "void*"),
+            ("vmk_HelperRequestFunc", "void*"),
+        ] {
+            self.type_macros
+                .insert(macro_name.to_string(), expansion.to_string());
+        }
     }
 
     /// Check if an identifier is a known type macro
@@ -354,7 +417,12 @@ impl CPreprocessor {
     /// - Strips problematic attributes
     /// - Normalizes some macro patterns
     pub fn preprocess(&self, source: &str) -> String {
-        let mut result = String::with_capacity(source.len());
+        let mut result = String::with_capacity(source.len() + 2048);
+
+        // Inject typedef preamble for any VMK/ESX types found in the source so
+        // tree-sitter recognises them as type specifiers (function return types,
+        // parameter types, local variable types).
+        self.inject_type_preamble(source, &mut result);
 
         for line in source.lines() {
             let processed = self.process_line(line);
@@ -363,6 +431,42 @@ impl CPreprocessor {
         }
 
         result
+    }
+
+    /// Scan `source` for known type-macro identifiers and emit `typedef` lines
+    /// at the top of `out` so tree-sitter can treat them as type specifiers.
+    fn inject_type_preamble(&self, source: &str, out: &mut String) {
+        for (name, expansion) in &self.type_macros {
+            // Skip non-type expansions (constants like NULL → ((void*)0), true → 1)
+            if !Self::is_type_expansion(expansion) {
+                continue;
+            }
+
+            // Only inject if the identifier actually appears in the source.
+            if !source.contains(name.as_str()) {
+                continue;
+            }
+
+            // Pointer expansions: strip trailing `*` for proper typedef syntax
+            if let Some(base) = expansion.strip_suffix('*') {
+                out.push_str(&format!("typedef {base} *{name};\n"));
+            } else {
+                out.push_str(&format!("typedef {expansion} {name};\n"));
+            }
+        }
+    }
+
+    /// Check if an expansion string is a valid C type (not a constant or complex expression)
+    fn is_type_expansion(expansion: &str) -> bool {
+        // Reject expressions with parentheses: ((void*)0), (-1), etc.
+        // Reject array types: unsigned char[6], char[32]
+        // Reject pure numeric constants: 1, 0
+        !expansion.contains('(')
+            && !expansion.contains('[')
+            && expansion
+                .chars()
+                .next()
+                .map_or(false, |c| c.is_alphabetic() || c == '_')
     }
 
     /// Process a single line
