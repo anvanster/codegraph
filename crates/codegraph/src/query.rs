@@ -203,20 +203,22 @@ impl<'a> QueryBuilder<'a> {
         let limit = self.limit_value.unwrap_or(usize::MAX);
 
         // If in_file filter is set, only search nodes in that file
-        let search_nodes: Vec<NodeId> = if let Some(file_path) = &self.in_file_filter {
-            self.get_nodes_in_file(file_path)?
-        } else {
-            // Search all nodes
-            (0..self.graph.node_count() as u64).collect()
-        };
-
-        // Iterate through nodes and apply filters
-        for node_id in search_nodes {
-            if results.len() >= limit {
-                break;
+        if let Some(file_path) = &self.in_file_filter {
+            for node_id in self.get_nodes_in_file(file_path)? {
+                if results.len() >= limit {
+                    break;
+                }
+                if let Ok(node) = self.graph.get_node(node_id) {
+                    if self.matches_filters(node) {
+                        results.push(node_id);
+                    }
+                }
             }
-
-            if let Ok(node) = self.graph.get_node(node_id) {
+        } else {
+            for (&node_id, node) in self.graph.nodes_iter() {
+                if results.len() >= limit {
+                    break;
+                }
                 if self.matches_filters(node) {
                     results.push(node_id);
                 }
@@ -230,16 +232,16 @@ impl<'a> QueryBuilder<'a> {
     pub fn count(&self) -> Result<usize> {
         let mut count = 0;
 
-        // If in_file filter is set, only search nodes in that file
-        let search_nodes: Vec<NodeId> = if let Some(file_path) = &self.in_file_filter {
-            self.get_nodes_in_file(file_path)?
+        if let Some(file_path) = &self.in_file_filter {
+            for node_id in self.get_nodes_in_file(file_path)? {
+                if let Ok(node) = self.graph.get_node(node_id) {
+                    if self.matches_filters(node) {
+                        count += 1;
+                    }
+                }
+            }
         } else {
-            // Search all nodes
-            (0..self.graph.node_count() as u64).collect()
-        };
-
-        for node_id in search_nodes {
-            if let Ok(node) = self.graph.get_node(node_id) {
+            for (_, node) in self.graph.nodes_iter() {
                 if self.matches_filters(node) {
                     count += 1;
                 }
@@ -251,16 +253,16 @@ impl<'a> QueryBuilder<'a> {
 
     /// Check if any nodes match the query (short-circuits on first match).
     pub fn exists(&self) -> Result<bool> {
-        // If in_file filter is set, only search nodes in that file
-        let search_nodes: Vec<NodeId> = if let Some(file_path) = &self.in_file_filter {
-            self.get_nodes_in_file(file_path)?
+        if let Some(file_path) = &self.in_file_filter {
+            for node_id in self.get_nodes_in_file(file_path)? {
+                if let Ok(node) = self.graph.get_node(node_id) {
+                    if self.matches_filters(node) {
+                        return Ok(true);
+                    }
+                }
+            }
         } else {
-            // Search all nodes
-            (0..self.graph.node_count() as u64).collect()
-        };
-
-        for node_id in search_nodes {
-            if let Ok(node) = self.graph.get_node(node_id) {
+            for (_, node) in self.graph.nodes_iter() {
                 if self.matches_filters(node) {
                     return Ok(true);
                 }
@@ -273,14 +275,12 @@ impl<'a> QueryBuilder<'a> {
     /// Get all nodes contained in a specific file.
     fn get_nodes_in_file(&self, file_path: &str) -> Result<Vec<NodeId>> {
         // First find the file node
-        for node_id in 0..self.graph.node_count() as u64 {
-            if let Ok(node) = self.graph.get_node(node_id) {
-                if node.node_type == NodeType::CodeFile {
-                    if let Some(path) = node.properties.get_string("path") {
-                        if path == file_path {
-                            // Found the file, now get all nodes it contains
-                            return self.graph.get_neighbors(node_id, Direction::Outgoing);
-                        }
+        for (&node_id, node) in self.graph.nodes_iter() {
+            if node.node_type == NodeType::CodeFile {
+                if let Some(path) = node.properties.get_string("path") {
+                    if path == file_path {
+                        // Found the file, now get all nodes it contains
+                        return self.graph.get_neighbors(node_id, Direction::Outgoing);
                     }
                 }
             }

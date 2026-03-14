@@ -489,6 +489,11 @@ impl CodeGraph {
         self.nodes.len()
     }
 
+    /// Iterate over all (NodeId, Node) pairs in the graph.
+    pub fn nodes_iter(&self) -> impl Iterator<Item = (&NodeId, &Node)> {
+        self.nodes.iter()
+    }
+
     /// Get the total number of edges in the graph.
     pub fn edge_count(&self) -> usize {
         self.edges.len()

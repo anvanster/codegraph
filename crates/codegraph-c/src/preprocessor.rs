@@ -466,7 +466,7 @@ impl CPreprocessor {
             && expansion
                 .chars()
                 .next()
-                .map_or(false, |c| c.is_alphabetic() || c == '_')
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
     }
 
     /// Process a single line

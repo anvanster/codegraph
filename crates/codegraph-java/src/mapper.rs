@@ -84,15 +84,20 @@ pub fn ir_to_graph(
         }
         if let Some(ref complexity) = func.complexity {
             props = props
-                .with(
-                    "cyclomatic_complexity",
-                    complexity.cyclomatic_complexity as i64,
-                )
+                .with("complexity", complexity.cyclomatic_complexity as i64)
                 .with("complexity_grade", complexity.grade().to_string())
-                .with("branches", complexity.branches as i64)
-                .with("loops", complexity.loops as i64)
-                .with("logical_operators", complexity.logical_operators as i64)
-                .with("max_nesting_depth", complexity.max_nesting_depth as i64);
+                .with("complexity_branches", complexity.branches as i64)
+                .with("complexity_loops", complexity.loops as i64)
+                .with(
+                    "complexity_logical_ops",
+                    complexity.logical_operators as i64,
+                )
+                .with("complexity_nesting", complexity.max_nesting_depth as i64)
+                .with(
+                    "complexity_exceptions",
+                    complexity.exception_handlers as i64,
+                )
+                .with("complexity_early_returns", complexity.early_returns as i64);
         }
 
         let func_id = graph

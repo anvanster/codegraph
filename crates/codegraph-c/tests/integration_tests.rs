@@ -1257,12 +1257,15 @@ irndrv_RDMAOpGetPrivStats(
         .next()
         .expect("Should find irndrv_RDMAOpGetPrivStats");
 
-    let complexity = func_node
+    let complexity = func_node.properties.get_int("complexity").unwrap_or(0);
+    let branches = func_node
         .properties
-        .get_int("cyclomatic_complexity")
+        .get_int("complexity_branches")
         .unwrap_or(0);
-    let branches = func_node.properties.get_int("branches").unwrap_or(0);
-    let loops = func_node.properties.get_int("loops").unwrap_or(0);
+    let loops = func_node
+        .properties
+        .get_int("complexity_loops")
+        .unwrap_or(0);
 
     println!(
         "  complexity={}, branches={}, loops={}",
@@ -1335,7 +1338,10 @@ irndrv_RDMAOpGetPrivStats(vmk_AddrCookie driverData, char *statBuf,
         .expect("should parse");
 
     println!("Functions found: {}", result.functions.len());
-    assert!(!result.functions.is_empty(), "Should find at least one function");
+    assert!(
+        !result.functions.is_empty(),
+        "Should find at least one function"
+    );
 
     let func_ids = graph
         .query()
@@ -1357,12 +1363,15 @@ irndrv_RDMAOpGetPrivStats(vmk_AddrCookie driverData, char *statBuf,
         .next()
         .expect("Should find irndrv_RDMAOpGetPrivStats");
 
-    let complexity = func_node
+    let complexity = func_node.properties.get_int("complexity").unwrap_or(0);
+    let branches = func_node
         .properties
-        .get_int("cyclomatic_complexity")
+        .get_int("complexity_branches")
         .unwrap_or(0);
-    let branches = func_node.properties.get_int("branches").unwrap_or(0);
-    let loops = func_node.properties.get_int("loops").unwrap_or(0);
+    let loops = func_node
+        .properties
+        .get_int("complexity_loops")
+        .unwrap_or(0);
 
     println!(
         "  complexity={}, branches={}, loops={}",
@@ -1379,4 +1388,94 @@ irndrv_RDMAOpGetPrivStats(vmk_AddrCookie driverData, char *statBuf,
     );
     assert!(branches > 0, "Expected branches > 0, got {}", branches);
     assert!(loops > 0, "Expected loops > 0, got {}", loops);
+}
+
+#[test]
+fn test_ice_driver_parsing() {
+    use codegraph::{CodeGraph, NodeType};
+    use codegraph_c::{CParser, CodeParser};
+    use std::path::Path;
+
+    let ice_dir = Path::new("/Users/anvanster/projects/docs/ethernet-linux-ice/src");
+    if !ice_dir.exists() {
+        eprintln!(
+            "Skipping: ICE driver source not found at {}",
+            ice_dir.display()
+        );
+        return;
+    }
+
+    let parser = CParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+
+    let mut total_files = 0u32;
+    let mut total_functions = 0u32;
+    let mut parse_errors = 0u32;
+
+    for entry in std::fs::read_dir(ice_dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "c") {
+            total_files += 1;
+            match parser.parse_file(&path, &mut graph) {
+                Ok(fi) => {
+                    total_functions += fi.functions.len() as u32;
+                }
+                Err(e) => {
+                    parse_errors += 1;
+                    eprintln!(
+                        "  FAIL: {}: {}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    eprintln!("\n=== ICE Driver Parse Results ===");
+    eprintln!("Files:     {total_files}");
+    eprintln!("Functions: {total_functions}");
+    eprintln!("Errors:    {parse_errors}");
+    eprintln!("Nodes:     {}", graph.node_count());
+    eprintln!("Edges:     {}", graph.edge_count());
+
+    // Collect complexity stats
+    let mut complexities: Vec<(String, u32)> = Vec::new();
+    for (_, node) in graph.nodes_iter() {
+        if node.node_type == NodeType::Function {
+            let name = node
+                .properties
+                .get_string("name")
+                .unwrap_or("?")
+                .to_string();
+            let c = node.properties.get_int("complexity").unwrap_or(1) as u32;
+            complexities.push((name, c));
+        }
+    }
+    complexities.sort_by(|a, b| b.1.cmp(&a.1));
+    eprintln!("\nTop 15 most complex functions:");
+    for (name, c) in complexities.iter().take(15) {
+        let grade = match c {
+            0..=5 => 'A',
+            6..=10 => 'B',
+            11..=20 => 'C',
+            21..=50 => 'D',
+            _ => 'F',
+        };
+        eprintln!("  {c:3} ({grade}) {name}");
+    }
+
+    // Assertions
+    assert!(total_files > 50, "Expected >50 C files, got {total_files}");
+    assert!(
+        total_functions > 100,
+        "Expected >100 functions, got {total_functions}"
+    );
+    // Allow some parse errors (kernel C has macros/ifdefs that confuse tree-sitter)
+    let success_rate = (total_files - parse_errors) as f64 / total_files as f64;
+    eprintln!("\nSuccess rate: {:.0}%", success_rate * 100.0);
+    assert!(
+        success_rate > 0.5,
+        "Less than 50% of files parsed successfully"
+    );
 }
