@@ -60,14 +60,19 @@ pub fn extract(
     file_path: &Path,
     _config: &ParserConfig,
 ) -> Result<CodeIR, ParserError> {
-    let result = extract_with_options(
-        source,
-        file_path,
-        &ExtractionOptions {
-            extract_calls: true,
-            ..Default::default()
-        },
-    )?;
+    // Detect VMK/kernel code upfront — these files often parse without
+    // ERROR nodes but produce wrong IR because tree-sitter doesn't know
+    // the custom typedefs. Preprocess them immediately instead of waiting
+    // for the tolerant fallback (which only triggers on SyntaxError).
+    let needs_preprocess = source_has_kernel_types(source);
+
+    let options = ExtractionOptions {
+        extract_calls: true,
+        preprocess: needs_preprocess,
+        ..Default::default()
+    };
+
+    let result = extract_with_options(source, file_path, &options)?;
 
     if result.is_partial {
         return Err(ParserError::SyntaxError(
@@ -79,6 +84,23 @@ pub fn extract(
     }
 
     Ok(result.ir)
+}
+
+/// Quick scan for VMK/ESX/kernel-style type names that tree-sitter won't
+/// recognise as type specifiers without preprocessing.
+fn source_has_kernel_types(source: &str) -> bool {
+    // Check the first ~4KB for common patterns (fast path for normal C files)
+    let sample = if source.len() > 4096 {
+        &source[..4096]
+    } else {
+        source
+    };
+    sample.contains("vmk_")
+        || sample.contains("VMK_")
+        || sample.contains("vmk_Bool")
+        || sample.contains("vmk_uint")
+        || sample.contains("vmk_Uplink")
+        || sample.contains("vmk_Device")
 }
 
 /// Extract with custom options (supports tolerant mode)
@@ -509,15 +531,23 @@ int complex_func(int x) {
 
 #[test]
 fn test_irndrv_verbs_calls() {
-    let path = "/home/jason/projects/docs/drivers.ethernet.rdma.esxn/src/COMMON_RDMA/irndrv_verbs.c";
+    let path =
+        "/home/jason/projects/docs/drivers.ethernet.rdma.esxn/src/COMMON_RDMA/irndrv_verbs.c";
     let Ok(source) = std::fs::read_to_string(path) else {
         println!("Skipping: file not found");
         return;
     };
     let opts = ExtractionOptions::for_kernel_code();
     let result = extract_with_options(&source, Path::new(path), &opts).unwrap();
-    println!("functions={} total_calls={}", result.ir.functions.len(), result.ir.calls.len());
-    let priv_calls: Vec<_> = result.ir.calls.iter()
+    println!(
+        "functions={} total_calls={}",
+        result.ir.functions.len(),
+        result.ir.calls.len()
+    );
+    let priv_calls: Vec<_> = result
+        .ir
+        .calls
+        .iter()
         .filter(|c| c.caller == "irndrv_RDMAOpGetPrivStats")
         .collect();
     println!("irndrv_RDMAOpGetPrivStats calls: {}", priv_calls.len());
@@ -526,10 +556,16 @@ fn test_irndrv_verbs_calls() {
     }
     println!("First 5 calls overall:");
     for c in result.ir.calls.iter().take(5) {
-        println!("  {} -> {} at line {}", c.caller, c.callee, c.call_site_line);
+        println!(
+            "  {} -> {} at line {}",
+            c.caller, c.callee, c.call_site_line
+        );
     }
     // Should have at least some calls
-    assert!(!result.ir.calls.is_empty(), "No calls extracted from irndrv_verbs.c!");
+    assert!(
+        !result.ir.calls.is_empty(),
+        "No calls extracted from irndrv_verbs.c!"
+    );
 }
 
 /// Diagnose where cross-file call edges are lost in the pipeline.
@@ -542,7 +578,8 @@ fn test_irndrv_verbs_calls() {
 fn test_mapper_unresolved_calls() {
     use codegraph::{CodeGraph, EdgeType, NodeType};
 
-    let path = "/home/jason/projects/docs/drivers.ethernet.rdma.esxn/src/COMMON_RDMA/irndrv_verbs.c";
+    let path =
+        "/home/jason/projects/docs/drivers.ethernet.rdma.esxn/src/COMMON_RDMA/irndrv_verbs.c";
     let Ok(source) = std::fs::read_to_string(path) else {
         println!("Skipping: file not found");
         return;
@@ -552,17 +589,30 @@ fn test_mapper_unresolved_calls() {
     let opts = ExtractionOptions::for_kernel_code();
     let result = extract_with_options(&source, Path::new(path), &opts).unwrap();
 
-    let priv_calls: Vec<_> = result.ir.calls.iter()
+    let priv_calls: Vec<_> = result
+        .ir
+        .calls
+        .iter()
         .filter(|c| c.caller == "irndrv_RDMAOpGetPrivStats")
         .collect();
-    println!("IR: irndrv_RDMAOpGetPrivStats has {} calls", priv_calls.len());
+    println!(
+        "IR: irndrv_RDMAOpGetPrivStats has {} calls",
+        priv_calls.len()
+    );
     for c in priv_calls.iter().take(5) {
         println!("  -> {} at line {}", c.callee, c.call_site_line);
     }
 
     // Check if irdma_report_pfc_stats appears in functions (it shouldn't - it's defined in utils.c)
-    let report_in_functions = result.ir.functions.iter().any(|f| f.name == "irdma_report_pfc_stats");
-    println!("irdma_report_pfc_stats in ir.functions: {}", report_in_functions);
+    let report_in_functions = result
+        .ir
+        .functions
+        .iter()
+        .any(|f| f.name == "irdma_report_pfc_stats");
+    println!(
+        "irdma_report_pfc_stats in ir.functions: {}",
+        report_in_functions
+    );
     println!("Total functions in IR: {}", result.ir.functions.len());
 
     // Step 2: map to graph
@@ -572,12 +622,20 @@ fn test_mapper_unresolved_calls() {
 
     // Step 3: check unresolved_calls on irndrv_RDMAOpGetPrivStats
     let mut privstats_id = None;
-    for func_id in graph.query().node_type(NodeType::Function).execute().unwrap_or_default() {
+    for func_id in graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap_or_default()
+    {
         if let Ok(node) = graph.get_node(func_id) {
             if node.properties.get_string("name") == Some("irndrv_RDMAOpGetPrivStats") {
                 privstats_id = Some(func_id);
                 let unresolved = node.properties.get_string("unresolved_calls").unwrap_or("");
-                println!("Node unresolved_calls (first 300 chars): '{}'", &unresolved[..unresolved.len().min(300)]);
+                println!(
+                    "Node unresolved_calls (first 300 chars): '{}'",
+                    &unresolved[..unresolved.len().min(300)]
+                );
                 // Also check string_list variant
                 if let Some(list) = node.properties.get_string_list_compat("unresolved_calls") {
                     println!("Node unresolved_calls as list: {} items", list.len());
@@ -589,20 +647,30 @@ fn test_mapper_unresolved_calls() {
             }
         }
     }
-    assert!(privstats_id.is_some(), "irndrv_RDMAOpGetPrivStats not found in graph after mapping");
+    assert!(
+        privstats_id.is_some(),
+        "irndrv_RDMAOpGetPrivStats not found in graph after mapping"
+    );
 
     // Step 4: now simulate resolve_cross_file_imports manually
     // Add a stub node for irdma_report_pfc_stats (simulating it being indexed from utils.c)
-    let stub_id = graph.add_node(codegraph::NodeType::Function, {
-        codegraph::PropertyMap::new()
-            .with("name", "irdma_report_pfc_stats")
-            .with("path", "/fake/irndrv_utils.c")
-    }).unwrap();
+    let stub_id = graph
+        .add_node(codegraph::NodeType::Function, {
+            codegraph::PropertyMap::new()
+                .with("name", "irdma_report_pfc_stats")
+                .with("path", "/fake/irndrv_utils.c")
+        })
+        .unwrap();
     println!("Added stub node for irdma_report_pfc_stats: {:?}", stub_id);
 
     // Now run the resolution logic
     let mut symbol_map = std::collections::HashMap::new();
-    for func_id in graph.query().node_type(NodeType::Function).execute().unwrap_or_default() {
+    for func_id in graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap_or_default()
+    {
         if let Ok(node) = graph.get_node(func_id) {
             if let Some(name) = node.properties.get_string("name") {
                 symbol_map.insert(name.to_string(), func_id);
@@ -610,11 +678,18 @@ fn test_mapper_unresolved_calls() {
         }
     }
     println!("symbol_map size: {}", symbol_map.len());
-    println!("irdma_report_pfc_stats in symbol_map: {}", symbol_map.contains_key("irdma_report_pfc_stats"));
+    println!(
+        "irdma_report_pfc_stats in symbol_map: {}",
+        symbol_map.contains_key("irdma_report_pfc_stats")
+    );
 
     // Resolve unresolved calls
     let mut edges_added = 0;
-    let func_ids: Vec<_> = graph.query().node_type(NodeType::Function).execute().unwrap_or_default();
+    let func_ids: Vec<_> = graph
+        .query()
+        .node_type(NodeType::Function)
+        .execute()
+        .unwrap_or_default();
     let mut calls_to_add = Vec::new();
     for func_id in &func_ids {
         if let Ok(node) = graph.get_node(*func_id) {
@@ -636,13 +711,24 @@ fn test_mapper_unresolved_calls() {
     // Step 5: check the edge exists
     let ps_id = privstats_id.unwrap();
     if let Ok(edges) = graph.get_edges_between(ps_id, stub_id) {
-        let calls: Vec<_> = edges.iter().filter(|&&e| {
-            graph.get_edge(e).map(|edge| edge.edge_type == EdgeType::Calls).unwrap_or(false)
-        }).collect();
-        println!("Calls edges irndrv_RDMAOpGetPrivStats -> irdma_report_pfc_stats: {}", calls.len());
-        assert!(!calls.is_empty(),
+        let calls: Vec<_> = edges
+            .iter()
+            .filter(|&&e| {
+                graph
+                    .get_edge(e)
+                    .map(|edge| edge.edge_type == EdgeType::Calls)
+                    .unwrap_or(false)
+            })
+            .collect();
+        println!(
+            "Calls edges irndrv_RDMAOpGetPrivStats -> irdma_report_pfc_stats: {}",
+            calls.len()
+        );
+        assert!(
+            !calls.is_empty(),
             "Expected Calls edge after resolution, but got 0. \
-             This means the mapper is NOT storing irdma_report_pfc_stats in unresolved_calls.");
+             This means the mapper is NOT storing irdma_report_pfc_stats in unresolved_calls."
+        );
     } else {
         panic!("get_edges_between failed");
     }
