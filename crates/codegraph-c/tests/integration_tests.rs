@@ -1479,3 +1479,114 @@ fn test_ice_driver_parsing() {
         "Less than 50% of files parsed successfully"
     );
 }
+
+#[test]
+fn test_vmware_open_vm_tools_parsing() {
+    use codegraph::{CodeGraph, NodeType};
+    use codegraph_c::{CParser, CodeParser};
+
+    let src_dir = std::path::Path::new("/Users/anvanster/projects/docs/open-vm-tools");
+    if !src_dir.exists() {
+        eprintln!("Skipping: open-vm-tools not found");
+        return;
+    }
+
+    let parser = CParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+
+    let mut total_files = 0u32;
+    let mut total_functions = 0u32;
+    let mut parse_errors = 0u32;
+    let mut vmk_files = 0u32;
+    let mut vmk_functions = 0u32;
+
+    // Recursively find all .c files
+    fn find_c_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    find_c_files(&path, files);
+                } else if path.extension().is_some_and(|e| e == "c") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    let mut c_files = Vec::new();
+    find_c_files(src_dir, &mut c_files);
+
+    for path in &c_files {
+        total_files += 1;
+        let source = std::fs::read_to_string(path).unwrap_or_default();
+        let has_vmk = source.contains("vmk_") || source.contains("VMK_");
+
+        match parser.parse_file(path, &mut graph) {
+            Ok(fi) => {
+                total_functions += fi.functions.len() as u32;
+                if has_vmk {
+                    vmk_files += 1;
+                    vmk_functions += fi.functions.len() as u32;
+                }
+            }
+            Err(e) => {
+                parse_errors += 1;
+                if has_vmk {
+                    eprintln!(
+                        "  VMK FAIL: {}: {}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    eprintln!("\n=== VMware open-vm-tools Parse Results ===");
+    eprintln!("Total files:     {total_files}");
+    eprintln!("Total functions: {total_functions}");
+    eprintln!("Parse errors:    {parse_errors}");
+    eprintln!("VMK files:       {vmk_files} ({vmk_functions} functions)");
+    eprintln!("Nodes:           {}", graph.node_count());
+    eprintln!("Edges:           {}", graph.edge_count());
+
+    let success_rate = (total_files - parse_errors) as f64 / total_files as f64;
+    eprintln!("Success rate:    {:.0}%", success_rate * 100.0);
+
+    // Show top complex VMK functions
+    let mut complexities: Vec<(String, String, u32)> = Vec::new();
+    for (_, node) in graph.nodes_iter() {
+        if node.node_type == NodeType::Function {
+            let name = node
+                .properties
+                .get_string("name")
+                .unwrap_or("?")
+                .to_string();
+            let path = node.properties.get_string("path").unwrap_or("").to_string();
+            let c = node.properties.get_int("complexity").unwrap_or(1) as u32;
+            if path.contains("vmk")
+                || path.contains("VMK")
+                || path.contains("vmci")
+                || path.contains("pvscsi")
+            {
+                complexities.push((name, path, c));
+            }
+        }
+    }
+    complexities.sort_by(|a, b| b.2.cmp(&a.2));
+    if !complexities.is_empty() {
+        eprintln!("\nTop VMware-related complex functions:");
+        for (name, path, c) in complexities.iter().take(10) {
+            let file = std::path::Path::new(path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            eprintln!("  {c:3} {name} ({file})");
+        }
+    }
+
+    assert!(total_files > 100, "Expected >100 C files");
+    assert!(total_functions > 500, "Expected >500 functions");
+    assert!(success_rate > 0.5, "Less than 50% success rate");
+}
