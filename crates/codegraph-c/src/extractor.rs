@@ -530,6 +530,57 @@ int complex_func(int x) {
 }
 
 #[test]
+fn test_split_return_type_function_name() {
+    // Function with return type on separate line from name
+    let source = r#"
+static VMK_ReturnStatus
+irndrv_Attach(vmk_Device device)
+{
+    return 0;
+}
+
+int
+another_split(void)
+{
+    return 42;
+}
+
+int normal_func(void) {
+    return 0;
+}
+"#;
+    let config = ParserConfig::default();
+    let result = extract(source, Path::new("test.c"), &config);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    let ir = result.unwrap();
+
+    let names: Vec<&str> = ir.functions.iter().map(|f| f.name.as_str()).collect();
+    eprintln!("Functions found: {:?}", names);
+    for f in &ir.functions {
+        eprintln!(
+            "  name='{}' sig='{}' ret={:?} line={}",
+            f.name, f.signature, f.return_type, f.line_start
+        );
+    }
+
+    assert!(
+        names.contains(&"irndrv_Attach"),
+        "Missing irndrv_Attach in {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"another_split"),
+        "Missing another_split in {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"normal_func"),
+        "Missing normal_func in {:?}",
+        names
+    );
+}
+
+#[test]
 fn test_irndrv_verbs_calls() {
     let path =
         "/home/jason/projects/docs/drivers.ethernet.rdma.esxn/src/COMMON_RDMA/irndrv_verbs.c";
