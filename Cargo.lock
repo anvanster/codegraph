@@ -421,6 +421,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "codegraph-verilog"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-verilog",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1108,6 +1125,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-language"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
 name = "tree-sitter-php"
 version = "0.22.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1165,6 +1188,16 @@ checksum = "ecb35d98a688378e56c18c9c159824fd16f730ccbea19aacf4f206e5d5438ed9"
 dependencies = [
  "cc",
  "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-verilog"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4e7e0360395852f1f6ff5b7b82c72dc6557d181073188df1d60ec469ea69c66"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
 ]
 
 [[package]]
