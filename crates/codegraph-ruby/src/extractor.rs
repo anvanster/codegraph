@@ -217,4 +217,51 @@ end
         assert_eq!(module.language, "ruby");
         assert!(module.line_count > 0);
     }
+
+    #[test]
+    fn test_extract_calls() {
+        let source = r#"
+def helper
+  42
+end
+
+def caller
+  helper
+  puts "hello"
+end
+
+class MyClass
+  def process
+    validate
+    helper
+  end
+
+  def validate
+    true
+  end
+end
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.rb"), &config);
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(!ir.calls.is_empty(), "Expected calls to be extracted");
+
+        // caller -> helper
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "helper"),
+            "Expected caller -> helper call, got: {:?}",
+            ir.calls.iter().map(|c| format!("{}->{}", c.caller, c.callee)).collect::<Vec<_>>()
+        );
+        // process -> validate
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "validate"),
+            "Expected process -> validate call"
+        );
+        // process -> helper
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "helper"),
+            "Expected process -> helper call"
+        );
+    }
 }

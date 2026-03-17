@@ -392,3 +392,68 @@ function broken( {
     let result = parser.parse_source(source, Path::new("test.php"), &mut graph);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_calls_edges() {
+    use codegraph::{Direction, EdgeType};
+
+    let parser = PhpParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+
+    let source = r#"<?php
+function helper() {
+    return 42;
+}
+
+function caller() {
+    helper();
+}
+"#;
+
+    let result = parser.parse_source(source, Path::new("test.php"), &mut graph);
+    assert!(result.is_ok());
+
+    let caller_id = graph
+        .query()
+        .node_type(codegraph::NodeType::Function)
+        .execute()
+        .unwrap()
+        .into_iter()
+        .find(|&id| {
+            graph
+                .get_node(id)
+                .map(|n| n.properties.get_string("name") == Some("caller"))
+                .unwrap_or(false)
+        })
+        .expect("Should find 'caller' function");
+
+    let callees: Vec<String> = graph
+        .get_neighbors(caller_id, Direction::Outgoing)
+        .unwrap_or_default()
+        .iter()
+        .filter(|&&neighbor_id| {
+            graph
+                .get_edges_between(caller_id, neighbor_id)
+                .unwrap_or_default()
+                .iter()
+                .any(|&e| {
+                    graph
+                        .get_edge(e)
+                        .map(|edge| edge.edge_type == EdgeType::Calls)
+                        .unwrap_or(false)
+                })
+        })
+        .map(|&id| {
+            graph
+                .get_node(id)
+                .map(|n| n.properties.get_string("name").unwrap_or("?").to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+
+    assert!(
+        callees.contains(&"helper".to_string()),
+        "Should have Calls edge to 'helper', got: {:?}",
+        callees
+    );
+}
