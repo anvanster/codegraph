@@ -285,4 +285,56 @@ class Dog extends Animal {
         assert_eq!(ir.classes.len(), 2);
         assert!(!ir.inheritance.is_empty());
     }
+
+    #[test]
+    fn test_extract_calls() {
+        let source = r#"<?php
+function helper() {
+    return 42;
+}
+
+function caller() {
+    helper();
+    strlen("hello");
+}
+
+class MyClass {
+    public function process() {
+        $this->validate();
+        helper();
+    }
+
+    private function validate() {
+        return true;
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.php"), &config);
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(!ir.calls.is_empty(), "Expected calls to be extracted");
+
+        // caller -> helper
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "helper"),
+            "Expected caller -> helper call, got: {:?}",
+            ir.calls.iter().map(|c| format!("{}->{}", c.caller, c.callee)).collect::<Vec<_>>()
+        );
+        // caller -> strlen
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "strlen"),
+            "Expected caller -> strlen call"
+        );
+        // process -> validate (method call via $this->)
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "validate"),
+            "Expected process -> validate call"
+        );
+        // process -> helper
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "helper"),
+            "Expected process -> helper call"
+        );
+    }
 }
