@@ -294,4 +294,25 @@ public class Dog : Animal
         assert_eq!(ir.classes.len(), 2);
         assert!(!ir.inheritance.is_empty());
     }
+
+    #[test]
+    fn test_extract_calls() {
+        let source = r#"
+public class MyClass
+{
+    public void Caller()
+    {
+        Helper();
+    }
+
+    public void Helper() {}
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.cs"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(!ir.calls.is_empty(), "Should extract at least one call");
+    }
 }

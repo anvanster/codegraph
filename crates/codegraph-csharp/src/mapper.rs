@@ -552,6 +552,40 @@ mod tests {
     }
 
     #[test]
+    fn test_ir_to_graph_with_calls() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::CallRelation;
+
+        let mut ir = CodeIR::new(PathBuf::from("test.cs"));
+        ir.add_function(FunctionEntity::new("Caller", 1, 10));
+        ir.add_function(FunctionEntity::new("Helper", 12, 20));
+        ir.add_call(CallRelation::new("Caller", "Helper", 5));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("test.cs").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        assert_eq!(file_info.functions.len(), 2);
+
+        let caller_id = file_info.functions[0];
+        let callee_id = file_info.functions[1];
+
+        let edges = graph.get_edges_between(caller_id, callee_id).unwrap();
+        assert!(
+            !edges.is_empty(),
+            "Should have call edge between Caller and Helper"
+        );
+
+        let edge = graph.get_edge(edges[0]).unwrap();
+        assert_eq!(
+            edge.edge_type,
+            EdgeType::Calls,
+            "Edge should be of type Calls"
+        );
+    }
+
+    #[test]
     fn test_property_types() {
         use codegraph::PropertyValue;
         use codegraph_parser_api::{FunctionEntity, ModuleEntity};
