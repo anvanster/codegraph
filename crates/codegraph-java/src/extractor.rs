@@ -257,4 +257,100 @@ public class Dog extends Animal {
         assert_eq!(ir.classes.len(), 2);
         assert!(!ir.inheritance.is_empty());
     }
+
+    #[test]
+    fn test_extract_method_calls() {
+        let source = r#"
+public class Service {
+    public void doWork() {
+        helper();
+        process();
+    }
+
+    private void helper() {}
+    private void process() {}
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Service.java"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(!ir.calls.is_empty());
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "doWork" && c.callee == "helper"),
+            "Expected call doWork -> helper"
+        );
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "doWork" && c.callee == "process"),
+            "Expected call doWork -> process"
+        );
+    }
+
+    #[test]
+    fn test_extract_static_method_calls() {
+        let source = r#"
+public class MathHelper {
+    public void calculate() {
+        Math.abs(-5);
+        Helper.format("text");
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("MathHelper.java"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "calculate" && c.callee == "Math.abs"),
+            "Expected call calculate -> Math.abs"
+        );
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "calculate" && c.callee == "Helper.format"),
+            "Expected call calculate -> Helper.format"
+        );
+    }
+
+    #[test]
+    fn test_extract_constructor_calls() {
+        let source = r#"
+public class Factory {
+    public void create() {
+        new ArrayList();
+        new HashMap();
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Factory.java"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "create" && c.callee == "new ArrayList"),
+            "Expected call create -> new ArrayList"
+        );
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "create" && c.callee == "new HashMap"),
+            "Expected call create -> new HashMap"
+        );
+    }
+
+    #[test]
+    fn test_extract_calls_empty_when_no_calls() {
+        let source = r#"
+public class Pure {
+    public int add(int a, int b) {
+        return a + b;
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Pure.java"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(ir.calls.is_empty(), "No calls expected in pure arithmetic method");
+    }
 }

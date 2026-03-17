@@ -554,6 +554,88 @@ mod tests {
     }
 
     #[test]
+    fn test_ir_to_graph_with_resolved_calls() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::CallRelation;
+
+        let mut ir = CodeIR::new(PathBuf::from("Test.java"));
+        ir.add_function(FunctionEntity::new("caller", 1, 5));
+        ir.add_function(FunctionEntity::new("callee", 7, 10));
+        ir.calls.push(CallRelation::new("caller", "callee", 3));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("Test.java").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        assert_eq!(file_info.functions.len(), 2);
+
+        let caller_id = file_info.functions[0];
+        let callee_id = file_info.functions[1];
+        let edges = graph.get_edges_between(caller_id, callee_id).unwrap();
+        assert!(!edges.is_empty(), "Should have a Calls edge");
+        let edge = graph.get_edge(edges[0]).unwrap();
+        assert_eq!(edge.edge_type, EdgeType::Calls);
+    }
+
+    #[test]
+    fn test_ir_to_graph_with_unresolved_calls() {
+        use codegraph::PropertyValue;
+        use codegraph_parser_api::CallRelation;
+
+        let mut ir = CodeIR::new(PathBuf::from("Test.java"));
+        ir.add_function(FunctionEntity::new("caller", 1, 5));
+        ir.calls.push(CallRelation::new("caller", "external_fn", 3));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("Test.java").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        let caller_node = graph.get_node(file_info.functions[0]).unwrap();
+        // Unresolved callee should be stored on the caller node
+        let unresolved = caller_node.properties.get("unresolved_calls");
+        assert!(unresolved.is_some(), "Expected unresolved_calls property on caller");
+        if let Some(PropertyValue::StringList(list)) = unresolved {
+            assert!(list.contains(&"external_fn".to_string()));
+        } else {
+            panic!("unresolved_calls should be a StringList");
+        }
+    }
+
+    #[test]
+    fn test_ir_to_graph_call_edge_properties() {
+        use codegraph::PropertyValue;
+        use codegraph_parser_api::CallRelation;
+
+        let mut ir = CodeIR::new(PathBuf::from("Test.java"));
+        ir.add_function(FunctionEntity::new("caller", 1, 5));
+        ir.add_function(FunctionEntity::new("callee", 7, 10));
+        ir.calls.push(CallRelation::new("caller", "callee", 3));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, PathBuf::from("Test.java").as_path());
+
+        assert!(result.is_ok());
+        let file_info = result.unwrap();
+        let caller_id = file_info.functions[0];
+        let callee_id = file_info.functions[1];
+        let edges = graph.get_edges_between(caller_id, callee_id).unwrap();
+        assert!(!edges.is_empty());
+        let edge = graph.get_edge(edges[0]).unwrap();
+        assert_eq!(
+            edge.properties.get("call_site_line"),
+            Some(&PropertyValue::Int(3)),
+            "call_site_line should be 3"
+        );
+        assert_eq!(
+            edge.properties.get("is_direct"),
+            Some(&PropertyValue::Bool(true)),
+            "is_direct should be true"
+        );
+    }
+
+    #[test]
     fn test_property_types() {
         use codegraph::PropertyValue;
         let mut ir = CodeIR::new(PathBuf::from("test.java"));

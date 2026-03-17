@@ -222,4 +222,66 @@ fun test() {
         assert_eq!(module.language, "kotlin");
         assert!(module.line_count > 0);
     }
+
+    #[test]
+    fn test_extract_calls() {
+        let source = r#"
+class Foo {
+    fun bar() {
+        baz()
+    }
+    fun baz() {}
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Foo.kt"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "bar" && c.callee == "baz"),
+            "Expected call bar -> baz"
+        );
+    }
+
+    #[test]
+    fn test_extract_top_level_function_calls() {
+        let source = r#"
+fun caller() {
+    helper()
+    process()
+}
+
+fun helper() {}
+fun process() {}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("TopLevel.kt"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "helper"),
+            "Expected call caller -> helper"
+        );
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "process"),
+            "Expected call caller -> process"
+        );
+    }
+
+    #[test]
+    fn test_extract_calls_empty_when_no_calls() {
+        let source = r#"
+fun add(a: Int, b: Int): Int {
+    return a + b
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("Pure.kt"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(ir.calls.is_empty(), "No calls expected in pure arithmetic function");
+    }
 }
