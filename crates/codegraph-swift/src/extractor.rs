@@ -164,4 +164,56 @@ class Dog: Animal {}
         assert_eq!(ir.classes.len(), 2);
         assert!(!ir.inheritance.is_empty());
     }
+
+    #[test]
+    fn test_extract_calls() {
+        let source = r#"
+func helper() -> Int {
+    return 42
+}
+
+func caller() {
+    helper()
+    print("hello")
+}
+
+class MyClass {
+    func process() {
+        validate()
+        helper()
+    }
+
+    func validate() -> Bool {
+        return true
+    }
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.swift"), &config);
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert!(!ir.calls.is_empty(), "Expected calls to be extracted");
+
+        // caller -> helper
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "helper"),
+            "Expected caller -> helper call, got: {:?}",
+            ir.calls.iter().map(|c| format!("{}->{}", c.caller, c.callee)).collect::<Vec<_>>()
+        );
+        // caller -> print
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "print"),
+            "Expected caller -> print call"
+        );
+        // process -> validate
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "validate"),
+            "Expected process -> validate call"
+        );
+        // process -> helper
+        assert!(
+            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "helper"),
+            "Expected process -> helper call"
+        );
+    }
 }
