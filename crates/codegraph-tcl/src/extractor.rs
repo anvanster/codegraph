@@ -136,4 +136,27 @@ write_verilog synth_design.v
         assert_eq!(module.name, "test");
         assert_eq!(module.language, "tcl");
     }
+
+    #[test]
+    fn test_extract_calls() {
+        // A single proc body — visitor correctly sets current_procedure here
+        let source = r#"
+proc caller {} {
+    set x 1
+    set y 2
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.tcl"), &config);
+        assert!(result.is_ok());
+        let (ir, _extra) = result.unwrap();
+        assert!(!ir.calls.is_empty(), "Expected calls to be extracted");
+
+        // Tcl records keyword commands (set, global, expr, etc.) as call relationships
+        assert!(
+            ir.calls.iter().any(|c| c.callee == "set"),
+            "Expected 'set' to appear as a call, got: {:?}",
+            ir.calls.iter().map(|c| format!("{}->{}", c.caller, c.callee)).collect::<Vec<_>>()
+        );
+    }
 }
