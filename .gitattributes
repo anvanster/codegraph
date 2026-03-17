@@ -1,0 +1,2 @@
+.mulch/expertise/*.jsonl merge=union
+.seeds/issues.jsonl merge=union
