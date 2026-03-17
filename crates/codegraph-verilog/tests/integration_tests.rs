@@ -200,11 +200,73 @@ fn test_parse_syntax_error() {
 #[test]
 fn test_parser_info() {
     let parser = VerilogParser::new();
-    assert_eq!(parser.language(), "verilog");
+    assert_eq!(parser.language(), "systemverilog");
     assert!(parser.can_parse(Path::new("counter.v")));
     assert!(parser.can_parse(Path::new("defs.vh")));
+    assert!(parser.can_parse(Path::new("design.sv")));
+    assert!(parser.can_parse(Path::new("defs.svh")));
     assert!(!parser.can_parse(Path::new("main.go")));
-    assert!(!parser.can_parse(Path::new("design.sv")));
+}
+
+#[test]
+fn test_parse_sv_interface() {
+    let source = "interface my_bus; logic clk; endinterface\n";
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = VerilogParser::new();
+
+    let result = parser.parse_source(source, Path::new("bus.sv"), &mut graph);
+    assert!(result.is_ok(), "Failed: {:?}", result.err());
+
+    let info = result.unwrap();
+    assert_eq!(info.classes.len(), 1, "Expected 1 interface");
+    let node = graph.get_node(info.classes[0]).unwrap();
+    assert_eq!(node.properties.get_string("name"), Some("my_bus"));
+}
+
+#[test]
+fn test_parse_sv_class() {
+    let source = "class Packet; int data; endclass\n";
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = VerilogParser::new();
+
+    let result = parser.parse_source(source, Path::new("packet.sv"), &mut graph);
+    assert!(result.is_ok(), "Failed: {:?}", result.err());
+
+    let info = result.unwrap();
+    assert_eq!(info.classes.len(), 1);
+    let node = graph.get_node(info.classes[0]).unwrap();
+    assert_eq!(node.properties.get_string("name"), Some("Packet"));
+}
+
+#[test]
+fn test_parse_sv_package() {
+    let source = "package my_pkg; endpackage\n";
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = VerilogParser::new();
+
+    let result = parser.parse_source(source, Path::new("pkg.sv"), &mut graph);
+    assert!(result.is_ok(), "Failed: {:?}", result.err());
+
+    let info = result.unwrap();
+    assert_eq!(info.classes.len(), 1);
+    let node = graph.get_node(info.classes[0]).unwrap();
+    assert_eq!(node.properties.get_string("name"), Some("my_pkg"));
+}
+
+#[test]
+fn test_parse_sv_language_tag() {
+    let parser = VerilogParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let source = "module top(); endmodule\n";
+
+    let sv_result = parser.parse_source(source, Path::new("top.sv"), &mut graph);
+    assert!(sv_result.is_ok());
+
+    let v_result = parser.parse_source(source, Path::new("top.v"), &mut graph);
+    assert!(v_result.is_ok());
 }
 
 #[test]

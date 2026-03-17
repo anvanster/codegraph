@@ -1,4 +1,4 @@
-//! AST extraction for Verilog source code
+//! AST extraction for SystemVerilog/Verilog source code
 
 use codegraph_parser_api::{CodeIR, ModuleEntity, ParserConfig, ParserError};
 use std::path::Path;
@@ -6,7 +6,16 @@ use tree_sitter::Parser;
 
 use crate::visitor::VerilogVisitor;
 
-/// Extract code entities and relationships from Verilog source code
+/// Determine language string from file extension.
+/// `.sv`/`.svh` → "systemverilog", `.v`/`.vh` → "verilog".
+fn language_for_path(file_path: &Path) -> &'static str {
+    match file_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "sv" | "svh" => "systemverilog",
+        _ => "verilog",
+    }
+}
+
+/// Extract code entities and relationships from SystemVerilog/Verilog source code
 pub fn extract(
     source: &str,
     file_path: &Path,
@@ -28,7 +37,7 @@ pub fn extract(
             file_path.to_path_buf(),
             0,
             0,
-            "Syntax error in Verilog source".to_string(),
+            "Syntax error in SystemVerilog/Verilog source".to_string(),
         ));
     }
 
@@ -42,7 +51,7 @@ pub fn extract(
     ir.module = Some(ModuleEntity {
         name: module_name,
         path: file_path.display().to_string(),
-        language: "verilog".to_string(),
+        language: language_for_path(file_path).to_string(),
         line_count: source.lines().count(),
         doc_comment: None,
         attributes: Vec::new(),
@@ -62,6 +71,14 @@ pub fn extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_language_for_path() {
+        assert_eq!(language_for_path(Path::new("foo.sv")), "systemverilog");
+        assert_eq!(language_for_path(Path::new("foo.svh")), "systemverilog");
+        assert_eq!(language_for_path(Path::new("foo.v")), "verilog");
+        assert_eq!(language_for_path(Path::new("foo.vh")), "verilog");
+    }
 
     #[test]
     fn test_extract_simple_module() {
@@ -127,6 +144,17 @@ endmodule
     }
 
     #[test]
+    fn test_extract_sv_language_tag() {
+        let source = "module top (); endmodule\n";
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("my_module.sv"), &config);
+
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+        assert_eq!(ir.module.unwrap().language, "systemverilog");
+    }
+
+    #[test]
     fn test_extract_multiple_modules() {
         let source = r#"
 module adder (input a, b, output sum);
@@ -155,5 +183,54 @@ endmodule
         let result = extract(source, Path::new("broken.v"), &config);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_sv_interface() {
+        let source = "interface my_bus; logic clk; endinterface\n";
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("bus.sv"), &config);
+
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "my_bus");
+        assert!(ir.classes[0].is_interface);
+    }
+
+    #[test]
+    fn test_extract_sv_class() {
+        let source = "class Packet; int data; endclass\n";
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("packet.sv"), &config);
+
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "Packet");
+    }
+
+    #[test]
+    fn test_extract_sv_package() {
+        let source = "package my_pkg; typedef int my_int; endpackage\n";
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("pkg.sv"), &config);
+
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "my_pkg");
+    }
+
+    #[test]
+    fn test_extract_sv_program() {
+        let source = "program my_test; initial begin end endprogram\n";
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.sv"), &config);
+
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+        assert_eq!(ir.classes.len(), 1);
+        assert_eq!(ir.classes[0].name, "my_test");
     }
 }

@@ -4,6 +4,8 @@ fn main() {
     // The tree-sitter-verilog crate compiles parser.c into a static lib, but its
     // cargo:rustc-link-lib directive may not propagate reliably without a `links` key.
     // We recompile the source ourselves to guarantee the symbol is available.
+    //
+    // Note: despite its name, tree-sitter-verilog IS the SystemVerilog grammar (ABI 14).
 
     let cargo_home = std::env::var("CARGO_HOME").unwrap_or_else(|_| {
         format!(

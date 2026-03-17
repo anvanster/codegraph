@@ -1,4 +1,4 @@
-//! Implementation of the CodeParser trait for Verilog
+//! Implementation of the CodeParser trait for SystemVerilog/Verilog
 
 use codegraph::CodeGraph;
 use codegraph_parser_api::{
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use crate::extractor;
 use crate::mapper;
 
-/// Verilog language parser implementing the CodeParser trait
+/// SystemVerilog/Verilog language parser implementing the CodeParser trait
 pub struct VerilogParser {
     config: ParserConfig,
     metrics: Mutex<ParserMetrics>,
@@ -70,17 +70,17 @@ impl Default for VerilogParser {
 
 impl CodeParser for VerilogParser {
     fn language(&self) -> &str {
-        "verilog"
+        "systemverilog"
     }
 
     fn file_extensions(&self) -> &[&str] {
-        &[".v", ".vh"]
+        &[".sv", ".svh", ".v", ".vh"]
     }
 
     fn can_parse(&self, path: &Path) -> bool {
         path.extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| matches!(ext, "v" | "vh"))
+            .map(|ext| matches!(ext, "sv" | "svh" | "v" | "vh"))
             .unwrap_or(false)
     }
 
@@ -191,13 +191,17 @@ mod tests {
     #[test]
     fn test_language() {
         let parser = VerilogParser::new();
-        assert_eq!(parser.language(), "verilog");
+        assert_eq!(parser.language(), "systemverilog");
     }
 
     #[test]
     fn test_file_extensions() {
         let parser = VerilogParser::new();
-        assert_eq!(parser.file_extensions(), &[".v", ".vh"]);
+        let exts = parser.file_extensions();
+        assert!(exts.contains(&".sv"));
+        assert!(exts.contains(&".svh"));
+        assert!(exts.contains(&".v"));
+        assert!(exts.contains(&".vh"));
     }
 
     #[test]
@@ -205,6 +209,8 @@ mod tests {
         let parser = VerilogParser::new();
         assert!(parser.can_parse(Path::new("counter.v")));
         assert!(parser.can_parse(Path::new("defs.vh")));
+        assert!(parser.can_parse(Path::new("counter.sv")));
+        assert!(parser.can_parse(Path::new("defs.svh")));
         assert!(!parser.can_parse(Path::new("main.go")));
         assert!(!parser.can_parse(Path::new("main.rs")));
     }
@@ -214,7 +220,29 @@ mod tests {
         let parser = VerilogParser::new();
         let mut graph = CodeGraph::in_memory().unwrap();
         let source = "module counter (input clk); endmodule\n";
-        let result = parser.parse_source(source, Path::new("counter.v"), &mut graph);
+        let result = parser.parse_source(source, Path::new("counter.sv"), &mut graph);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let info = result.unwrap();
+        assert_eq!(info.classes.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_sv_interface() {
+        let parser = VerilogParser::new();
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let source = "interface my_bus; logic clk; endinterface\n";
+        let result = parser.parse_source(source, Path::new("bus.sv"), &mut graph);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let info = result.unwrap();
+        assert_eq!(info.classes.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_sv_class() {
+        let parser = VerilogParser::new();
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let source = "class Packet; int data; endclass\n";
+        let result = parser.parse_source(source, Path::new("packet.sv"), &mut graph);
         assert!(result.is_ok(), "Failed: {:?}", result.err());
         let info = result.unwrap();
         assert_eq!(info.classes.len(), 1);

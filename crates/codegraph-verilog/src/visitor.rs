@@ -1,4 +1,8 @@
-//! AST visitor for extracting Verilog entities
+//! AST visitor for extracting SystemVerilog/Verilog entities
+//!
+//! Uses tree-sitter-verilog which, despite its name, is the SystemVerilog
+//! grammar (supports IEEE 1800-2012 constructs: modules, interfaces, classes,
+//! programs, packages, tasks, functions, instantiations, imports).
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity, ImportRelation,
@@ -70,10 +74,70 @@ impl<'a> VerilogVisitor<'a> {
         None
     }
 
+    /// Find identifier in an SV declaration using the *_identifier or *_ansi_header child.
+    /// For example, `interface_declaration` has `interface_ansi_header` which has
+    /// `interface_identifier` which has `simple_identifier`.
+    fn extract_sv_name(&self, node: Node, ansi_header_kind: &str, identifier_kind: &str) -> String {
+        // Look for the specific identifier node first (most precise)
+        let id_node: Option<Node> = {
+            let mut cursor = node.walk();
+            let found = node
+                .children(&mut cursor)
+                .find(|c| c.kind() == identifier_kind);
+            found
+        };
+        if let Some(n) = id_node {
+            if let Some(name) = self.find_identifier_in(n) {
+                return name;
+            }
+        }
+        // Try via the ansi header
+        let header_node: Option<Node> = {
+            let mut cursor = node.walk();
+            let found = node
+                .children(&mut cursor)
+                .find(|c| c.kind() == ansi_header_kind);
+            found
+        };
+        if let Some(h) = header_node {
+            let id_in_header: Option<Node> = {
+                let mut cursor = h.walk();
+                let found = h
+                    .children(&mut cursor)
+                    .find(|c| c.kind() == identifier_kind);
+                found
+            };
+            if let Some(n) = id_in_header {
+                if let Some(name) = self.find_identifier_in(n) {
+                    return name;
+                }
+            }
+        }
+        // Final fallback: recursive search
+        self.find_identifier_recursive(node, 4)
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
     pub fn visit_node(&mut self, node: Node) {
         match node.kind() {
             "module_declaration" => {
                 self.visit_module(node);
+                return;
+            }
+            "interface_declaration" => {
+                self.visit_interface(node);
+                return;
+            }
+            "class_declaration" => {
+                self.visit_class(node);
+                return;
+            }
+            "program_declaration" => {
+                self.visit_program(node);
+                return;
+            }
+            "package_declaration" => {
+                self.visit_package(node);
                 return;
             }
             "function_declaration" => {
@@ -92,6 +156,9 @@ impl<'a> VerilogVisitor<'a> {
             }
             "module_instantiation" => {
                 self.visit_module_instantiation(node);
+            }
+            "interface_instantiation" => {
+                self.visit_interface_instantiation(node);
             }
             "checker_instantiation" => {
                 // The grammar sometimes parses module instantiations as checker_instantiations
@@ -120,16 +187,52 @@ impl<'a> VerilogVisitor<'a> {
                 .unwrap_or_else(|| "unknown".to_string())
         };
 
+        self.push_class_entity(node, name, false, false);
+    }
+
+    fn visit_interface(&mut self, node: Node) {
+        // interface_declaration -> interface_ansi_header -> interface_identifier -> simple_identifier
+        // OR interface_declaration -> interface_identifier -> simple_identifier (non-ansi)
+        let name = self.extract_sv_name(node, "interface_ansi_header", "interface_identifier");
+        self.push_class_entity(node, name, false, true);
+    }
+
+    fn visit_class(&mut self, node: Node) {
+        // class_declaration -> class_identifier -> simple_identifier
+        let name = self.extract_sv_name(node, "", "class_identifier");
+        self.push_class_entity(node, name, false, false);
+    }
+
+    fn visit_program(&mut self, node: Node) {
+        // program_declaration -> program_ansi_header -> program_identifier -> simple_identifier
+        // OR program_declaration -> program_identifier -> simple_identifier (non-ansi)
+        let name = self.extract_sv_name(node, "program_ansi_header", "program_identifier");
+        self.push_class_entity(node, name, false, false);
+    }
+
+    fn visit_package(&mut self, node: Node) {
+        // package_declaration -> package_identifier -> simple_identifier
+        let name = self.extract_sv_name(node, "", "package_identifier");
+        self.push_class_entity(node, name, false, false);
+    }
+
+    fn push_class_entity(
+        &mut self,
+        node: Node,
+        name: String,
+        is_abstract: bool,
+        is_interface: bool,
+    ) {
         let prev_module = self.current_module.clone();
         self.current_module = Some(name.clone());
 
-        let module_entity = ClassEntity {
+        let entity = ClassEntity {
             name,
             visibility: "public".to_string(),
             line_start: node.start_position().row + 1,
             line_end: node.end_position().row + 1,
-            is_abstract: false,
-            is_interface: false,
+            is_abstract,
+            is_interface,
             base_classes: Vec::new(),
             implemented_traits: Vec::new(),
             methods: Vec::new(),
@@ -138,9 +241,9 @@ impl<'a> VerilogVisitor<'a> {
             attributes: Vec::new(),
             type_parameters: Vec::new(),
         };
-        self.modules.push(module_entity);
+        self.modules.push(entity);
 
-        // Visit children for functions/tasks/instantiations inside this module
+        // Visit children for functions/tasks/instantiations inside this construct
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.visit_node(child);
@@ -327,11 +430,12 @@ impl<'a> VerilogVisitor<'a> {
         // module_instantiation -> simple_identifier (module type being instantiated)
         let module_type = {
             let mut cursor = node.walk();
-            let found = node
+            let result = node
                 .children(&mut cursor)
                 .find(|c| c.kind() == "simple_identifier" || c.kind() == "escaped_identifier")
-                .map(|n| self.node_text(n));
-            found.unwrap_or_default()
+                .map(|n| self.node_text(n))
+                .unwrap_or_default();
+            result
         };
 
         if !module_type.is_empty() {
@@ -342,6 +446,36 @@ impl<'a> VerilogVisitor<'a> {
             self.calls.push(CallRelation::new(
                 caller,
                 module_type,
+                node.start_position().row + 1,
+            ));
+        }
+    }
+
+    fn visit_interface_instantiation(&mut self, node: Node) {
+        // interface_instantiation -> interface_identifier -> simple_identifier
+        let inst_type = {
+            let id_node: Option<Node> = {
+                let mut cursor = node.walk();
+                let found = node
+                    .children(&mut cursor)
+                    .find(|c| c.kind() == "interface_identifier");
+                found
+            };
+            if let Some(n) = id_node {
+                self.find_identifier_in(n).unwrap_or_default()
+            } else {
+                self.find_identifier_recursive(node, 3).unwrap_or_default()
+            }
+        };
+
+        if !inst_type.is_empty() {
+            let caller = self
+                .current_module
+                .clone()
+                .unwrap_or_else(|| "file".to_string());
+            self.calls.push(CallRelation::new(
+                caller,
+                inst_type,
                 node.start_position().row + 1,
             ));
         }
@@ -464,5 +598,105 @@ mod tests {
             !visitor.functions.is_empty(),
             "Expected at least one function"
         );
+    }
+
+    #[test]
+    fn test_visitor_sv_interface() {
+        use tree_sitter::Parser;
+        let source = b"interface my_bus; logic clk; endinterface";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(
+            visitor.modules.len(),
+            1,
+            "Expected 1 interface, got {:?}",
+            visitor.modules.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
+        assert_eq!(visitor.modules[0].name, "my_bus");
+        assert!(visitor.modules[0].is_interface);
+    }
+
+    #[test]
+    fn test_visitor_sv_class() {
+        use tree_sitter::Parser;
+        let source = b"class Packet; int data; endclass";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.modules.len(), 1);
+        assert_eq!(visitor.modules[0].name, "Packet");
+    }
+
+    #[test]
+    fn test_visitor_sv_package() {
+        use tree_sitter::Parser;
+        let source = b"package my_pkg; endpackage";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.modules.len(), 1);
+        assert_eq!(visitor.modules[0].name, "my_pkg");
+    }
+
+    #[test]
+    fn test_visitor_sv_package_import() {
+        use tree_sitter::Parser;
+        let source = b"module top(); import my_pkg::*; endmodule";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert!(!visitor.imports.is_empty(), "Expected package import");
+        assert_eq!(visitor.imports[0].imported, "my_pkg");
+        assert!(visitor.imports[0].is_wildcard);
+    }
+
+    #[test]
+    fn test_visitor_sv_program() {
+        use tree_sitter::Parser;
+        let source = b"program my_test; initial begin end endprogram";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.modules.len(), 1);
+        assert_eq!(visitor.modules[0].name, "my_test");
+    }
+
+    #[test]
+    fn test_visitor_module_instantiation() {
+        use tree_sitter::Parser;
+        let source = b"module top(); counter u1 (.clk(clk)); endmodule";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert!(
+            !visitor.calls.is_empty(),
+            "Expected module instantiation call"
+        );
+        assert_eq!(visitor.calls[0].callee, "counter");
     }
 }

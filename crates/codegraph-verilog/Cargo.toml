@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Verilog parser for CodeGraph - extracts code entities and relationships from Verilog source files"
-keywords = ["verilog", "hdl", "parser", "code-analysis", "tree-sitter"]
+description = "SystemVerilog/Verilog parser for CodeGraph - extracts code entities and relationships from SystemVerilog and Verilog source files"
+keywords = ["systemverilog", "verilog", "hdl", "parser", "tree-sitter"]
 categories = ["parser-implementations", "development-tools"]
 
 [dependencies]
@@ -21,8 +21,9 @@ rayon = "1.10"
 [build-dependencies]
 cc = "1.0"
 # tree-sitter-verilog is listed here so cargo downloads its source to the registry.
-# Our build.rs compiles parser.c directly (the 1.0 crate uses the newer tree-sitter-language
-# API which is incompatible with tree-sitter 0.22, so we can't use it as a runtime dep).
+# Despite its name, this IS the SystemVerilog grammar (see its README). It uses ABI 14
+# which is compatible with tree-sitter 0.22. We compile parser.c directly since the
+# 1.0 crate uses the newer tree-sitter-language API incompatible with tree-sitter 0.22.
 tree-sitter-verilog = "1.0"
 
 [dev-dependencies]
