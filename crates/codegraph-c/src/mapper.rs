@@ -203,29 +203,56 @@ pub fn ir_to_graph(
     let mut unresolved_calls: HashMap<String, Vec<String>> = HashMap::new();
 
     for call in &ir.calls {
-        if let Some(&caller_id) = node_map.get(&call.caller) {
-            if let Some(&callee_id) = node_map.get(&call.callee) {
-                // Both caller and callee are in this file - create direct edge
-                let edge_props = PropertyMap::new()
-                    .with("call_site_line", call.call_site_line as i64)
-                    .with("is_direct", call.is_direct);
-
-                graph
-                    .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
-                    .map_err(|e| ParserError::GraphError(e.to_string()))?;
+        // Resolve caller: function node, or file node for vtable assignments
+        let caller_id = node_map.get(&call.caller).copied().unwrap_or_else(|| {
+            // Vtable/struct initializer calls have synthetic caller names
+            // (e.g. "vtable_readlink") — use file node as the caller
+            if call.caller.starts_with("vtable_") {
+                file_id
             } else {
-                // Callee not found in this file - store for cross-file resolution
-                unresolved_calls
-                    .entry(call.caller.clone())
-                    .or_default()
-                    .push(call.callee.clone());
+                // Unknown caller — skip by returning a sentinel
+                u64::MAX
             }
+        });
+
+        if caller_id == u64::MAX {
+            continue;
+        }
+
+        if let Some(&callee_id) = node_map.get(&call.callee) {
+            // Both caller and callee are in this file - create direct edge
+            let edge_props = PropertyMap::new()
+                .with("call_site_line", call.call_site_line as i64)
+                .with("is_direct", call.is_direct);
+
+            graph
+                .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)
+                .map_err(|e| ParserError::GraphError(e.to_string()))?;
+        } else {
+            // Callee not found in this file - store for cross-file resolution
+            // For vtable calls, store on the file node so cross-file resolution
+            // can find the target function
+            let store_on = if call.caller.starts_with("vtable_") {
+                "file".to_string()
+            } else {
+                call.caller.clone()
+            };
+            unresolved_calls
+                .entry(store_on)
+                .or_default()
+                .push(call.callee.clone());
         }
     }
 
     // Store unresolved calls on caller nodes for post-processing
     for (caller_name, callees) in unresolved_calls {
-        if let Some(&caller_id) = node_map.get(&caller_name) {
+        // "file" is a special key for vtable calls — store on the file node
+        let caller_id_opt = if caller_name == "file" {
+            Some(file_id)
+        } else {
+            node_map.get(&caller_name).copied()
+        };
+        if let Some(caller_id) = caller_id_opt {
             if let Ok(node) = graph.get_node(caller_id) {
                 let mut all_callees: Vec<String> = node
                     .properties

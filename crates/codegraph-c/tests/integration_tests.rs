@@ -1590,3 +1590,77 @@ fn test_vmware_open_vm_tools_parsing() {
     assert!(total_functions > 500, "Expected >500 functions");
     assert!(success_rate > 0.5, "Less than 50% success rate");
 }
+
+#[test]
+fn test_vtable_detection_on_vmware_fsops() {
+    use codegraph::{CodeGraph, NodeType};
+    use codegraph_c::{CParser, CodeParser};
+
+    let fsops = std::path::Path::new(
+        "/Users/anvanster/projects/docs/open-vm-tools/open-vm-tools/vmblock-fuse/fsops.c",
+    );
+    if !fsops.exists() {
+        eprintln!("Skipping: open-vm-tools fsops.c not found");
+        return;
+    }
+
+    let parser = CParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let fi = parser
+        .parse_file(fsops, &mut graph)
+        .expect("Failed to parse fsops.c");
+
+    eprintln!("Functions: {}", fi.functions.len());
+    eprintln!("Edges: {}", graph.edge_count());
+
+    // The vtable: struct fuse_operations vmblockOperations = {
+    //   .readlink = VMBlockReadLink, .getattr = VMBlockGetAttr, ...
+    // };
+    // These should create Calls edges from the file node to the function nodes.
+    // Find the file node and check its outgoing Calls edges.
+    use codegraph::{Direction, EdgeType};
+
+    let file_node = graph
+        .nodes_iter()
+        .find(|(_, n)| n.node_type == NodeType::CodeFile)
+        .map(|(&id, _)| id);
+
+    assert!(file_node.is_some(), "Should have a file node");
+    let file_id = file_node.unwrap();
+
+    let neighbors = graph
+        .get_neighbors(file_id, Direction::Outgoing)
+        .unwrap_or_default();
+    let mut vtable_targets: Vec<String> = Vec::new();
+    for &neighbor_id in &neighbors {
+        if let Ok(edges) = graph.get_edges_between(file_id, neighbor_id) {
+            for &edge_id in &edges {
+                if let Ok(edge) = graph.get_edge(edge_id) {
+                    if edge.edge_type == EdgeType::Calls {
+                        if let Ok(target) = graph.get_node(neighbor_id) {
+                            let name = target
+                                .properties
+                                .get_string("name")
+                                .unwrap_or("")
+                                .to_string();
+                            vtable_targets.push(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("Vtable Calls edges from file node: {:?}", vtable_targets);
+
+    assert!(
+        vtable_targets.contains(&"VMBlockReadLink".to_string()),
+        "Expected Calls edge to VMBlockReadLink. Got: {:?}",
+        vtable_targets
+    );
+    assert!(
+        vtable_targets.contains(&"VMBlockGetAttr".to_string()),
+        "Expected Calls edge to VMBlockGetAttr. Got: {:?}",
+        vtable_targets
+    );
+}
