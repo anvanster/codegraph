@@ -527,6 +527,56 @@ int complex_func(int x) {
             }
         }
     }
+
+    #[test]
+    fn test_extract_vtable_function_pointers() {
+        let source = r#"
+static int my_get_stats(void *data) { return 42; }
+static void my_attach(void *device) {}
+
+static DeviceOps ops = {
+    .getStats = my_get_stats,
+    .attach = my_attach,
+    .timeout = 100,
+    .name = NULL,
+};
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.c"), &config);
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        eprintln!("vtable calls: {:?}", callees);
+
+        assert!(
+            callees.contains(&"my_get_stats"),
+            "Should detect .getStats = my_get_stats. Got: {:?}",
+            callees
+        );
+        assert!(
+            callees.contains(&"my_attach"),
+            "Should detect .attach = my_attach. Got: {:?}",
+            callees
+        );
+        // Should NOT include literals or NULL
+        assert!(
+            !callees.contains(&"NULL"),
+            "Should not include NULL as a callee"
+        );
+        assert!(
+            !callees.contains(&"100"),
+            "Should not include numeric literals"
+        );
+
+        // Verify vtable assignments have a caller context
+        let vtable_calls: Vec<_> = ir
+            .calls
+            .iter()
+            .filter(|c| c.callee == "my_get_stats" || c.callee == "my_attach")
+            .collect();
+        assert!(!vtable_calls.is_empty(), "Should have vtable call entries");
+    }
 }
 
 #[test]

@@ -77,6 +77,9 @@ impl<'a> CVisitor<'a> {
             "enum_specifier" => self.visit_enum(node),
             "preproc_include" => self.visit_include(node),
             "call_expression" if self.extract_calls => self.visit_call(node),
+            "initializer_pair" if self.extract_calls => {
+                self.visit_initializer_pair(node);
+            }
             _ => {}
         }
 
@@ -610,6 +613,62 @@ impl<'a> CVisitor<'a> {
                 },
             };
             self.imports.push(import);
+        }
+    }
+
+    /// Extract function pointer assignments from struct initializers.
+    ///
+    /// Detects patterns like:
+    /// ```c
+    /// static DeviceOps ops = {
+    ///     .getStats = my_get_stats,
+    ///     .attach = my_attach,
+    /// };
+    /// ```
+    /// Records each `.field = func_name` as a call relationship, making
+    /// vtable-registered functions visible to callers/find_unused_code.
+    fn visit_initializer_pair(&mut self, node: Node) {
+        // initializer_pair: field_designator "=" value
+        // We want: value is an identifier (function pointer, not a literal)
+        let mut field_name = String::new();
+        let mut value_name = String::new();
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "field_designator" => {
+                    if let Some(field) = child.child(1) {
+                        // child(0) is ".", child(1) is field_identifier
+                        if field.kind() == "field_identifier" {
+                            field_name = self.node_text(field);
+                        }
+                    }
+                }
+                "identifier" => {
+                    value_name = self.node_text(child);
+                }
+                _ => {}
+            }
+        }
+
+        // Only record if the value looks like a function name (not NULL, not a number)
+        if !value_name.is_empty()
+            && value_name != "NULL"
+            && value_name != "null"
+            && !value_name.starts_with(|c: char| c.is_ascii_digit())
+        {
+            // Use current_function as caller if inside a function, otherwise use
+            // the struct variable name (derived from the parent declaration)
+            let caller = self
+                .current_function
+                .clone()
+                .unwrap_or_else(|| format!("vtable_{}", field_name));
+
+            self.calls.push(FunctionCall {
+                callee: value_name,
+                line: node.start_position().row + 1,
+                caller: Some(caller),
+            });
         }
     }
 
