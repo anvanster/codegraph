@@ -6,7 +6,7 @@
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, Field, FunctionEntity,
     ImplementationRelation, ImportRelation, InheritanceRelation, Parameter, ParserConfig,
-    TraitEntity,
+    TraitEntity, TypeReference,
 };
 use tree_sitter::Node;
 
@@ -29,6 +29,7 @@ pub struct RustVisitor<'a> {
     pub calls: Vec<CallRelation>,
     pub implementations: Vec<ImplementationRelation>,
     pub inheritance: Vec<InheritanceRelation>,
+    pub type_references: Vec<TypeReference>,
     current_class: Option<String>,
     current_function: Option<String>,
 }
@@ -45,6 +46,7 @@ impl<'a> RustVisitor<'a> {
             calls: Vec::new(),
             implementations: Vec::new(),
             inheritance: Vec::new(),
+            type_references: Vec::new(),
             current_class: None,
             current_function: None,
         }
@@ -319,6 +321,9 @@ impl<'a> RustVisitor<'a> {
 
         self.functions.push(func);
 
+        // Extract type references from parameter and return type annotations
+        self.extract_type_refs_from_function(&name, node);
+
         // Visit body for call extraction
         if let Some(body) = node.child_by_field_name("body") {
             self.visit_body_for_calls(body);
@@ -343,6 +348,7 @@ impl<'a> RustVisitor<'a> {
 
         // Extract fields from field_declaration_list
         let mut fields = Vec::new();
+        let line = node.start_position().row + 1;
         if let Some(body) = node.child_by_field_name("body") {
             let mut cursor = body.walk();
             for child in body.children(&mut cursor) {
@@ -353,6 +359,17 @@ impl<'a> RustVisitor<'a> {
                         .unwrap_or_else(|| "unnamed".to_string());
 
                     let field_type = child.child_by_field_name("type").map(|n| self.node_text(n));
+
+                    // Extract type references from field type annotations
+                    if let Some(type_node) = child.child_by_field_name("type") {
+                        for type_name in self.extract_type_names(type_node) {
+                            self.type_references.push(TypeReference::new(
+                                name.clone(),
+                                type_name,
+                                line,
+                            ));
+                        }
+                    }
 
                     let field_vis = self.extract_visibility(child);
 
@@ -568,6 +585,9 @@ impl<'a> RustVisitor<'a> {
                     };
 
                     self.functions.push(func);
+
+                    // Extract type references from method parameter and return type annotations
+                    self.extract_type_refs_from_function(&method_name, child);
 
                     // Extract calls from method body
                     let previous_function = self.current_function.clone();
@@ -905,6 +925,156 @@ impl<'a> RustVisitor<'a> {
 
             i += 1;
         }
+    }
+
+    /// Extract type references from a function/method's parameter and return type annotations.
+    fn extract_type_refs_from_function(&mut self, name: &str, node: Node) {
+        let line = node.start_position().row + 1;
+
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            for child in params_node.children(&mut cursor) {
+                if child.kind() == "parameter" {
+                    if let Some(type_node) = child.child_by_field_name("type") {
+                        for type_name in self.extract_type_names(type_node) {
+                            self.type_references.push(TypeReference::new(
+                                name.to_string(),
+                                type_name,
+                                line,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(return_type_node) = node.child_by_field_name("return_type") {
+            for type_name in self.extract_type_names(return_type_node) {
+                self.type_references
+                    .push(TypeReference::new(name.to_string(), type_name, line));
+            }
+        }
+    }
+
+    /// Extract user-defined type names from a Rust type annotation node.
+    /// Skips primitive types and standard library containers, returns only
+    /// identifiers that could be user-defined types/structs/enums/traits.
+    fn extract_type_names(&self, type_node: Node) -> Vec<String> {
+        let mut names = Vec::new();
+        match type_node.kind() {
+            "type_identifier" => {
+                let name = self.node_text(type_node);
+                if !Self::is_builtin_rust_type(&name) {
+                    names.push(name);
+                }
+            }
+            "scoped_type_identifier" => {
+                // e.g., module::Type — take just the final name segment
+                if let Some(name_node) = type_node.child_by_field_name("name") {
+                    let name = self.node_text(name_node);
+                    if !Self::is_builtin_rust_type(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+            "generic_type" => {
+                // e.g., Vec<MyStruct>, Result<Output, MyError>
+                // Recurse into base type and type arguments
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "type_arguments" => {
+                // <T, U> — recurse into each argument
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "reference_type" => {
+                // &T or &mut T
+                if let Some(inner) = type_node.child_by_field_name("type") {
+                    names.extend(self.extract_type_names(inner));
+                }
+            }
+            "pointer_type" => {
+                // *const T or *mut T
+                if let Some(inner) = type_node.child_by_field_name("type") {
+                    names.extend(self.extract_type_names(inner));
+                }
+            }
+            "tuple_type" => {
+                // (A, B, C)
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            "slice_type" => {
+                // [T]
+                if let Some(inner) = type_node.child_by_field_name("type") {
+                    names.extend(self.extract_type_names(inner));
+                }
+            }
+            "array_type" => {
+                // [T; N] — extract element type
+                if let Some(inner) = type_node.child_by_field_name("element") {
+                    names.extend(self.extract_type_names(inner));
+                }
+            }
+            "abstract_type" | "dynamic_type" => {
+                // impl Trait / dyn Trait — extract the trait name
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    names.extend(self.extract_type_names(child));
+                }
+            }
+            _ => {}
+        }
+        names
+    }
+
+    /// Returns true for Rust primitive and standard-library types that are
+    /// not user-defined and therefore uninteresting as type references.
+    fn is_builtin_rust_type(name: &str) -> bool {
+        matches!(
+            name,
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "isize"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "usize"
+                | "f32"
+                | "f64"
+                | "bool"
+                | "char"
+                | "str"
+                | "String"
+                | "Vec"
+                | "Option"
+                | "Result"
+                | "Box"
+                | "Rc"
+                | "Arc"
+                | "HashMap"
+                | "HashSet"
+                | "BTreeMap"
+                | "BTreeSet"
+                | "Cow"
+                | "PhantomData"
+                | "Cell"
+                | "RefCell"
+                | "Mutex"
+                | "RwLock"
+                | "Self"
+        )
     }
 
     /// Visit a mod declaration (`mod foo;`)
@@ -1546,5 +1716,174 @@ impl Foo {
         // if(+1) + for(+1) + if(+1) + &&(+1) = CC = 1+4 = 5
         assert!(cx.cyclomatic_complexity >= 4);
         assert!(cx.max_nesting_depth >= 3);
+    }
+
+    // --- Type reference tests ---
+
+    #[test]
+    fn test_type_refs_function_params() {
+        let source = r#"
+struct MyInput;
+struct MyOutput;
+
+fn process(input: MyInput) -> MyOutput {
+    MyOutput
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let type_names: Vec<&str> = visitor
+            .type_references
+            .iter()
+            .map(|r| r.type_name.as_str())
+            .collect();
+        assert!(
+            type_names.contains(&"MyInput"),
+            "Should extract param type MyInput, got {:?}",
+            type_names
+        );
+        assert!(
+            type_names.contains(&"MyOutput"),
+            "Should extract return type MyOutput, got {:?}",
+            type_names
+        );
+        // Referrer should be the function name
+        let process_refs: Vec<_> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "process")
+            .collect();
+        assert_eq!(process_refs.len(), 2);
+    }
+
+    #[test]
+    fn test_type_refs_generic_types() {
+        let source = r#"
+struct Report;
+struct Error;
+
+fn generate(items: Vec<Report>) -> Result<Report, Error> {
+    Ok(Report)
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let type_names: Vec<&str> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "generate")
+            .map(|r| r.type_name.as_str())
+            .collect();
+        // Vec and Result are builtins, but Report and Error are user-defined
+        assert!(
+            type_names.contains(&"Report"),
+            "Should extract Report from Vec<Report> and Result<Report, Error>"
+        );
+        assert!(
+            type_names.contains(&"Error"),
+            "Should extract Error from Result<Report, Error>"
+        );
+        assert!(
+            !type_names.contains(&"Vec"),
+            "Vec is builtin and should be filtered"
+        );
+        assert!(
+            !type_names.contains(&"Result"),
+            "Result is builtin and should be filtered"
+        );
+    }
+
+    #[test]
+    fn test_type_refs_struct_fields() {
+        let source = r#"
+struct Address;
+struct Company;
+
+struct Person {
+    address: Address,
+    employer: Company,
+    age: u32,
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let struct_refs: Vec<&str> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "Person")
+            .map(|r| r.type_name.as_str())
+            .collect();
+        assert!(
+            struct_refs.contains(&"Address"),
+            "Should extract Address from struct field"
+        );
+        assert!(
+            struct_refs.contains(&"Company"),
+            "Should extract Company from struct field"
+        );
+        assert!(
+            !struct_refs.contains(&"u32"),
+            "u32 is builtin and should be filtered"
+        );
+    }
+
+    #[test]
+    fn test_type_refs_reference_types() {
+        let source = r#"
+struct Config;
+
+fn init(cfg: &Config) {}
+fn update(cfg: &mut Config) {}
+"#;
+        let visitor = parse_and_visit(source);
+        let type_names: Vec<&str> = visitor
+            .type_references
+            .iter()
+            .map(|r| r.type_name.as_str())
+            .collect();
+        assert!(
+            type_names.contains(&"Config"),
+            "Should extract Config from &Config and &mut Config"
+        );
+    }
+
+    #[test]
+    fn test_type_refs_method_in_impl() {
+        let source = r#"
+struct MyStruct;
+struct Input;
+struct Output;
+
+impl MyStruct {
+    fn process(&self, input: Input) -> Output {
+        Output
+    }
+}
+"#;
+        let visitor = parse_and_visit(source);
+        let method_refs: Vec<&str> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "process")
+            .map(|r| r.type_name.as_str())
+            .collect();
+        assert!(
+            method_refs.contains(&"Input"),
+            "Should extract Input from method param"
+        );
+        assert!(
+            method_refs.contains(&"Output"),
+            "Should extract Output from method return type"
+        );
+    }
+
+    #[test]
+    fn test_type_refs_primitives_filtered() {
+        let source = r#"
+fn add(a: i32, b: u64) -> f64 { 0.0 }
+"#;
+        let visitor = parse_and_visit(source);
+        assert!(
+            visitor.type_references.is_empty(),
+            "Primitive types should not produce type references, got {:?}",
+            visitor.type_references
+        );
     }
 }

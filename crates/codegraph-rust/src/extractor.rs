@@ -90,6 +90,7 @@ pub fn extract(
     ir.calls = visitor.calls;
     ir.implementations = visitor.implementations;
     ir.inheritance = visitor.inheritance;
+    ir.type_references = visitor.type_references;
 
     Ok(ir)
 }
