@@ -1,6 +1,6 @@
 //! Integration tests for codegraph-rust parser
 
-use codegraph::CodeGraph;
+use codegraph::{CodeGraph, EdgeType};
 use codegraph_parser_api::CodeParser;
 use codegraph_rust::RustParser;
 use std::path::Path;
@@ -582,5 +582,99 @@ fn standalone() {}
     assert!(
         callees.contains(&"standalone".to_string()),
         "Should have Calls edge to 'standalone'"
+    );
+}
+
+#[test]
+fn test_type_refs_resolved_in_same_file() {
+    // Both function and struct are defined in the same file — References edge should be created
+    let source = r#"
+struct Config {
+    value: i32,
+}
+
+fn setup(cfg: Config) -> Config {
+    cfg
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = RustParser::new();
+    let result = parser.parse_source(source, Path::new("test.rs"), &mut graph);
+    assert!(result.is_ok());
+
+    let info = result.unwrap();
+
+    let setup_id = info
+        .functions
+        .iter()
+        .find(|&&id| {
+            graph
+                .get_node(id)
+                .ok()
+                .and_then(|n| n.properties.get("name"))
+                .map(|v| matches!(v, codegraph::PropertyValue::String(s) if s == "setup"))
+                .unwrap_or(false)
+        })
+        .copied()
+        .expect("setup function should exist");
+
+    let config_id = info
+        .classes
+        .iter()
+        .find(|&&id| {
+            graph
+                .get_node(id)
+                .ok()
+                .and_then(|n| n.properties.get("name"))
+                .map(|v| matches!(v, codegraph::PropertyValue::String(s) if s == "Config"))
+                .unwrap_or(false)
+        })
+        .copied()
+        .expect("Config struct should exist");
+
+    let edge_ids = graph
+        .get_edges_between(setup_id, config_id)
+        .unwrap_or_default();
+    assert!(
+        edge_ids.iter().any(|&eid| {
+            graph
+                .get_edge(eid)
+                .map(|e| e.edge_type == EdgeType::References)
+                .unwrap_or(false)
+        }),
+        "setup should have a References edge to Config"
+    );
+}
+
+#[test]
+fn test_type_refs_unresolved_cross_file() {
+    // Type used in function signature but not defined in this file — stored as unresolved
+    let source = r#"
+fn handle(req: HttpRequest) -> HttpResponse {
+    HttpResponse::ok()
+}
+"#;
+
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = RustParser::new();
+    let result = parser.parse_source(source, Path::new("test.rs"), &mut graph);
+    assert!(result.is_ok());
+
+    let info = result.unwrap();
+    assert_eq!(info.functions.len(), 1);
+
+    let handle_id = info.functions[0];
+    let node = graph.get_node(handle_id).unwrap();
+    let unresolved = node
+        .properties
+        .get_string_list_compat("unresolved_type_refs")
+        .unwrap_or_default();
+
+    assert!(
+        unresolved.contains(&"HttpRequest".to_string())
+            || unresolved.contains(&"HttpResponse".to_string()),
+        "handle should have unresolved type refs for HttpRequest/HttpResponse, got: {:?}",
+        unresolved
     );
 }

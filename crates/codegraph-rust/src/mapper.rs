@@ -284,6 +284,45 @@ pub fn ir_to_graph(
         }
     }
 
+    // Add type reference relationships (creates References edges)
+    let mut unresolved_type_refs: HashMap<String, Vec<String>> = HashMap::new();
+
+    for type_ref in &ir.type_references {
+        if let Some(&referrer_id) = node_map.get(&type_ref.referrer) {
+            if let Some(&type_id) = node_map.get(&type_ref.type_name) {
+                let _ = graph.add_edge(
+                    referrer_id,
+                    type_id,
+                    EdgeType::References,
+                    PropertyMap::new(),
+                );
+            } else {
+                unresolved_type_refs
+                    .entry(type_ref.referrer.clone())
+                    .or_default()
+                    .push(type_ref.type_name.clone());
+            }
+        }
+    }
+
+    for (referrer_name, types) in unresolved_type_refs {
+        if let Some(&referrer_id) = node_map.get(&referrer_name) {
+            if let Ok(node) = graph.get_node(referrer_id) {
+                let mut all: Vec<String> = node
+                    .properties
+                    .get_string_list_compat("unresolved_type_refs")
+                    .unwrap_or_default();
+                for t in &types {
+                    if !all.iter().any(|existing| existing == t) {
+                        all.push(t.clone());
+                    }
+                }
+                let new_props = node.properties.clone().with("unresolved_type_refs", all);
+                let _ = graph.update_node_properties(referrer_id, new_props);
+            }
+        }
+    }
+
     // Add implementation relationships
     for impl_rel in &ir.implementations {
         if let (Some(&implementor_id), Some(&trait_id)) = (
@@ -539,6 +578,95 @@ mod tests {
         let file_info = result.unwrap();
         assert_eq!(file_info.traits.len(), 1);
         assert_eq!(file_info.classes.len(), 1);
+    }
+
+    #[test]
+    fn test_type_refs_resolved_creates_references_edge() {
+        use codegraph::EdgeType;
+        use codegraph_parser_api::TypeReference;
+
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.rs"));
+        ir.add_function(FunctionEntity::new("process", 1, 5));
+        ir.add_class(codegraph_parser_api::ClassEntity::new("Config", 6, 10));
+        ir.add_type_reference(TypeReference::new("process", "Config", 2));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, Path::new("test.rs"));
+        assert!(result.is_ok());
+
+        let file_info = result.unwrap();
+        let process_id = file_info.functions[0];
+        let config_id = file_info.classes[0];
+
+        // Verify References edge exists from process -> Config
+        let edge_ids = graph.get_edges_between(process_id, config_id).unwrap();
+        assert!(
+            edge_ids.iter().any(|&eid| {
+                graph
+                    .get_edge(eid)
+                    .map(|e| e.edge_type == EdgeType::References)
+                    .unwrap_or(false)
+            }),
+            "Expected References edge from process to Config"
+        );
+    }
+
+    #[test]
+    fn test_type_refs_unresolved_stored_as_property() {
+        use codegraph_parser_api::TypeReference;
+
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.rs"));
+        ir.add_function(FunctionEntity::new("handler", 1, 5));
+        // ExternalType is not in this IR (it's from another file)
+        ir.add_type_reference(TypeReference::new("handler", "ExternalType", 2));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, Path::new("test.rs"));
+        assert!(result.is_ok());
+
+        let file_info = result.unwrap();
+        let handler_id = file_info.functions[0];
+
+        let node = graph.get_node(handler_id).unwrap();
+        let unresolved = node
+            .properties
+            .get_string_list_compat("unresolved_type_refs")
+            .unwrap_or_default();
+        assert!(
+            unresolved.contains(&"ExternalType".to_string()),
+            "ExternalType should be stored as unresolved type ref, got: {:?}",
+            unresolved
+        );
+    }
+
+    #[test]
+    fn test_type_refs_dedup_unresolved() {
+        use codegraph_parser_api::TypeReference;
+
+        let mut ir = CodeIR::new(std::path::PathBuf::from("test.rs"));
+        ir.add_function(FunctionEntity::new("func", 1, 5));
+        // Same type referenced twice (params + return)
+        ir.add_type_reference(TypeReference::new("func", "Token", 2));
+        ir.add_type_reference(TypeReference::new("func", "Token", 3));
+
+        let mut graph = CodeGraph::in_memory().unwrap();
+        let result = ir_to_graph(&ir, &mut graph, Path::new("test.rs"));
+        assert!(result.is_ok());
+
+        let file_info = result.unwrap();
+        let func_id = file_info.functions[0];
+        let node = graph.get_node(func_id).unwrap();
+        let unresolved = node
+            .properties
+            .get_string_list_compat("unresolved_type_refs")
+            .unwrap_or_default();
+
+        assert_eq!(
+            unresolved.iter().filter(|t| t.as_str() == "Token").count(),
+            1,
+            "Token should appear only once after dedup, got: {:?}",
+            unresolved
+        );
     }
 
     #[test]
