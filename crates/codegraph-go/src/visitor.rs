@@ -2,9 +2,16 @@
 
 use codegraph_parser_api::{
     CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
-    ImportRelation, Parameter, TraitEntity,
+    ImportRelation, Parameter, TraitEntity, TypeReference,
 };
 use tree_sitter::Node;
+
+/// Built-in Go primitive types — not recorded as type references
+const GO_PRIMITIVES: &[&str] = &[
+    "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
+    "uintptr", "float32", "float64", "complex64", "complex128", "bool", "byte", "rune", "string",
+    "error", "any",
+];
 
 pub struct GoVisitor<'a> {
     pub source: &'a [u8],
@@ -13,6 +20,7 @@ pub struct GoVisitor<'a> {
     pub interfaces: Vec<TraitEntity>,
     pub imports: Vec<ImportRelation>,
     pub calls: Vec<CallRelation>,
+    pub type_references: Vec<TypeReference>,
     current_function: Option<String>,
 }
 
@@ -25,6 +33,7 @@ impl<'a> GoVisitor<'a> {
             interfaces: Vec::new(),
             imports: Vec::new(),
             calls: Vec::new(),
+            type_references: Vec::new(),
             current_function: None,
         }
     }
@@ -80,6 +89,8 @@ impl<'a> GoVisitor<'a> {
         let parameters = self.extract_parameters(node);
         let return_type = self.extract_return_type(node);
         let is_test = name.starts_with("Test") || name.starts_with("Benchmark");
+
+        self.extract_type_refs_from_signature(&name, node);
 
         let func = FunctionEntity {
             name,
@@ -150,6 +161,8 @@ impl<'a> GoVisitor<'a> {
 
         let parameters = self.extract_parameters(node);
         let return_type = self.extract_return_type(node);
+
+        self.extract_type_refs_from_signature(&name, node);
 
         let func = FunctionEntity {
             name,
@@ -382,6 +395,75 @@ impl<'a> GoVisitor<'a> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.visit_body_for_calls(child);
+        }
+    }
+
+    /// Extract type references from function/method parameter types and return type.
+    fn extract_type_refs_from_signature(&mut self, referrer: &str, node: Node) {
+        let line = node.start_position().row + 1;
+
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            for child in params_node.children(&mut cursor) {
+                match child.kind() {
+                    "parameter_declaration" | "variadic_parameter_declaration" => {
+                        if let Some(type_node) = child.child_by_field_name("type") {
+                            for type_name in self.collect_type_identifiers(type_node) {
+                                self.type_references.push(TypeReference::new(
+                                    referrer.to_string(),
+                                    type_name,
+                                    line,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if let Some(result_node) = node.child_by_field_name("result") {
+            for type_name in self.collect_type_identifiers(result_node) {
+                self.type_references.push(TypeReference::new(
+                    referrer.to_string(),
+                    type_name,
+                    line,
+                ));
+            }
+        }
+    }
+
+    /// Recursively collect user-defined type identifiers from a type AST node.
+    /// Skips built-in primitive types.
+    fn collect_type_identifiers(&self, node: Node) -> Vec<String> {
+        let mut result = Vec::new();
+        self.collect_type_identifiers_recursive(node, &mut result);
+        result
+    }
+
+    fn collect_type_identifiers_recursive(&self, node: Node, out: &mut Vec<String>) {
+        match node.kind() {
+            "type_identifier" => {
+                let name = self.node_text(node);
+                if !GO_PRIMITIVES.contains(&name.as_str()) {
+                    out.push(name);
+                }
+            }
+            "qualified_type" => {
+                // e.g., io.Reader — take the field (method name) portion
+                if let Some(field) = node.child_by_field_name("name") {
+                    let name = self.node_text(field);
+                    if !GO_PRIMITIVES.contains(&name.as_str()) {
+                        out.push(name);
+                    }
+                }
+            }
+            _ => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.collect_type_identifiers_recursive(child, out);
+                }
+            }
         }
     }
 
@@ -973,6 +1055,132 @@ func handle(x int, ch chan int) {
             complexity.branches
         );
         assert!(complexity.cyclomatic_complexity > 1, "CC should be > 1");
+    }
+
+    #[test]
+    fn test_type_refs_from_function_params() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\ntype Config struct{}\nfunc setup(cfg Config) error { return nil }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        // setup references Config (parameter) and error is primitive so skipped
+        let refs: Vec<_> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "setup")
+            .collect();
+        assert!(
+            refs.iter().any(|r| r.type_name == "Config"),
+            "setup should reference Config, got: {:?}",
+            refs
+        );
+        // error is a primitive — should not appear
+        assert!(
+            !refs.iter().any(|r| r.type_name == "error"),
+            "error is primitive and should be excluded"
+        );
+    }
+
+    #[test]
+    fn test_type_refs_from_return_type() {
+        use tree_sitter::Parser;
+
+        let source =
+            b"package main\ntype Response struct{}\nfunc fetch() Response { return Response{} }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        let refs: Vec<_> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "fetch")
+            .collect();
+        assert!(
+            refs.iter().any(|r| r.type_name == "Response"),
+            "fetch should reference Response, got: {:?}",
+            refs
+        );
+    }
+
+    #[test]
+    fn test_type_refs_method_receiver_not_counted() {
+        use tree_sitter::Parser;
+
+        // The receiver type should not create a type reference (it's not a param annotation)
+        let source =
+            b"package main\ntype Foo struct{}\ntype Bar struct{}\nfunc (f Foo) Do(b Bar) {}";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        // Do's parameter Bar should be a type ref
+        let refs: Vec<_> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "Do")
+            .collect();
+        assert!(
+            refs.iter().any(|r| r.type_name == "Bar"),
+            "Do should reference Bar, got: {:?}",
+            refs
+        );
+    }
+
+    #[test]
+    fn test_type_refs_pointer_type() {
+        use tree_sitter::Parser;
+
+        let source =
+            b"package main\ntype Node struct{}\nfunc process(n *Node) *Node { return n }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        let refs: Vec<_> = visitor
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "process")
+            .collect();
+        assert!(
+            refs.iter().any(|r| r.type_name == "Node"),
+            "process should reference Node through pointer type, got: {:?}",
+            refs
+        );
+    }
+
+    #[test]
+    fn test_type_refs_primitives_excluded() {
+        use tree_sitter::Parser;
+
+        let source = b"package main\nfunc add(a int, b int) int { return a + b }";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = GoVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(
+            visitor.type_references.len(),
+            0,
+            "Primitives only — no type references expected"
+        );
     }
 
     #[test]

@@ -56,6 +56,7 @@ pub fn extract(
     ir.traits = visitor.interfaces;
     ir.imports = visitor.imports;
     ir.calls = visitor.calls;
+    ir.type_references = visitor.type_references;
 
     Ok(ir)
 }

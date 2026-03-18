@@ -268,6 +268,45 @@ pub fn ir_to_graph(
         }
     }
 
+    // Add type reference relationships (creates References edges)
+    let mut unresolved_type_refs: HashMap<String, Vec<String>> = HashMap::new();
+
+    for type_ref in &ir.type_references {
+        if let Some(&referrer_id) = node_map.get(&type_ref.referrer) {
+            if let Some(&type_id) = node_map.get(&type_ref.type_name) {
+                let _ = graph.add_edge(
+                    referrer_id,
+                    type_id,
+                    EdgeType::References,
+                    PropertyMap::new(),
+                );
+            } else {
+                unresolved_type_refs
+                    .entry(type_ref.referrer.clone())
+                    .or_default()
+                    .push(type_ref.type_name.clone());
+            }
+        }
+    }
+
+    for (referrer_name, types) in unresolved_type_refs {
+        if let Some(&referrer_id) = node_map.get(&referrer_name) {
+            if let Ok(node) = graph.get_node(referrer_id) {
+                let mut all: Vec<String> = node
+                    .properties
+                    .get_string_list_compat("unresolved_type_refs")
+                    .unwrap_or_default();
+                for t in &types {
+                    if !all.iter().any(|existing| existing == t) {
+                        all.push(t.clone());
+                    }
+                }
+                let new_props = node.properties.clone().with("unresolved_type_refs", all);
+                let _ = graph.update_node_properties(referrer_id, new_props);
+            }
+        }
+    }
+
     // Add inheritance relationships
     for inheritance in &ir.inheritance {
         if let (Some(&child_id), Some(&parent_id)) = (
