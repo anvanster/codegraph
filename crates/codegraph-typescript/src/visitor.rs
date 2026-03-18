@@ -94,6 +94,14 @@ impl<'a> TypeScriptVisitor<'a> {
                     self.visit_node(child);
                 }
             }
+            "variable_declarator" => {
+                // const x: MyType = ... — extract type annotation
+                self.visit_variable_type_annotation(node);
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            }
             _ => {
                 // Recursively visit children for unhandled node types
                 let mut cursor = node.walk();
@@ -828,6 +836,25 @@ impl<'a> TypeScriptVisitor<'a> {
                         node.start_position().row + 1,
                     ));
                 }
+            }
+        }
+    }
+
+    /// Visit variable declarations with type annotations: const x: MyType = ...
+    fn visit_variable_type_annotation(&mut self, node: Node) {
+        let func_name = match &self.current_function {
+            Some(name) => name.clone(),
+            None => return,
+        };
+
+        // variable_declarator has a "type" field for the type annotation
+        if let Some(type_node) = node.child_by_field_name("type") {
+            for type_name in self.extract_type_names(type_node) {
+                self.type_references.push(TypeReference::new(
+                    func_name.clone(),
+                    type_name,
+                    node.start_position().row + 1,
+                ));
             }
         }
     }

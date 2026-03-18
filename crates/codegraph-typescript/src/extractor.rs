@@ -450,4 +450,50 @@ function process(params: MyParams): MyResponse {
             response_refs
         );
     }
+
+    #[test]
+    fn test_extract_type_references_in_expressions() {
+        let source = r#"
+interface Config {
+    timeout: number;
+}
+
+interface Result {
+    data: string;
+}
+
+function process() {
+    const cfg: Config = { timeout: 100 };
+    const result = {} as Result;
+    const items = new Map<string, Config>();
+}
+"#;
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("test.ts"), &config);
+        assert!(result.is_ok());
+        let ir = result.unwrap();
+
+        let process_refs: Vec<_> = ir
+            .type_references
+            .iter()
+            .filter(|r| r.referrer == "process")
+            .map(|r| r.type_name.as_str())
+            .collect();
+
+        eprintln!("process type refs: {:?}", process_refs);
+
+        // Variable type annotation: const cfg: Config
+        assert!(
+            process_refs.contains(&"Config"),
+            "Should reference Config from variable annotation. Got: {:?}",
+            process_refs
+        );
+
+        // as cast: {} as Result
+        assert!(
+            process_refs.contains(&"Result"),
+            "Should reference Result from as cast. Got: {:?}",
+            process_refs
+        );
+    }
 }
