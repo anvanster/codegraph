@@ -4,6 +4,8 @@ use codegraph_parser_api::{CodeIR, ModuleEntity, ParserConfig, ParserError};
 use std::path::Path;
 use tree_sitter::Parser;
 
+use codegraph_parser_api::{CallRelation, FunctionEntity};
+
 use crate::visitor::CobolVisitor;
 
 /// Extract code entities and relationships from COBOL source code.
@@ -53,7 +55,82 @@ pub fn extract(
     ir.imports = visitor.imports;
     ir.calls = visitor.calls;
 
+    // Source-level extraction for constructs the grammar doesn't parse:
+    // GO TO and EXEC CICS XCTL/LINK
+    extract_goto_and_cics(source, &ir.functions, &mut ir.calls);
+
     Ok(ir)
+}
+
+/// Source-level extraction for GO TO and EXEC CICS constructs.
+///
+/// The tree-sitter COBOL grammar doesn't parse GO TO as a distinct node type
+/// and doesn't understand CICS extensions at all. We extract these from source
+/// text directly.
+fn extract_goto_and_cics(
+    source: &str,
+    paragraphs: &[FunctionEntity],
+    calls: &mut Vec<CallRelation>,
+) {
+    for (line_num, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        let line_1indexed = line_num + 1;
+
+        // Find which paragraph this line belongs to
+        let caller = paragraphs
+            .iter()
+            .rfind(|p| line_1indexed >= p.line_start && line_1indexed <= p.line_end)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "file".to_string());
+
+        // GO TO paragraph-name
+        if let Some(target) = trimmed
+            .strip_prefix("GO TO ")
+            .or_else(|| trimmed.strip_prefix("GO  TO "))
+            .or_else(|| trimmed.strip_prefix("go to "))
+        {
+            let target = target.trim().trim_end_matches('.');
+            if !target.is_empty() && !target.contains(' ') {
+                calls.push(CallRelation::new(
+                    caller.clone(),
+                    target.to_string(),
+                    line_1indexed,
+                ));
+            }
+        }
+
+        // EXEC CICS XCTL PROGRAM('name') or EXEC CICS LINK PROGRAM('name')
+        if (trimmed.contains("EXEC CICS XCTL") || trimmed.contains("EXEC CICS LINK"))
+            && trimmed.contains("PROGRAM")
+        {
+            // Program name might be on this line or next
+            if let Some(prog) = extract_cics_program_name(trimmed) {
+                calls.push(CallRelation::new(caller.clone(), prog, line_1indexed));
+            }
+        }
+        // PROGRAM clause might be on the next line after EXEC CICS XCTL
+        if trimmed.starts_with("PROGRAM") && trimmed.contains('(') {
+            if let Some(prog) = extract_cics_program_name(trimmed) {
+                calls.push(CallRelation::new(caller.clone(), prog, line_1indexed));
+            }
+        }
+    }
+}
+
+/// Extract program name from CICS PROGRAM clause.
+/// Handles: PROGRAM('MYPROG'), PROGRAM(WS-PROGNAME), PROGRAM (CDEMO-TO-PROGRAM)
+fn extract_cics_program_name(text: &str) -> Option<String> {
+    let idx = text.find("PROGRAM")?;
+    let rest = &text[idx + 7..];
+    let rest = rest.trim();
+    let rest = rest.strip_prefix('(')?;
+    let end = rest.find(')')?;
+    let name = rest[..end].trim().trim_matches('\'').trim_matches('"');
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -221,6 +298,32 @@ mod tests {
         assert!(
             callees.contains(&"PROCESS-DATA"),
             "Expected PERFORM PROCESS-DATA. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_goto_and_cics() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. GOTEST.\n",
+            "       procedure division.\n",
+            "       MAIN-PARA.\n",
+            "           GO TO EXIT-PARA\n",
+            "           stop run.\n",
+            "       EXIT-PARA.\n",
+            "           exit.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("goto.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        eprintln!("GO TO calls: {:?}", callees);
+        assert!(
+            callees.contains(&"EXIT-PARA"),
+            "Expected GO TO EXIT-PARA. Got: {:?}",
             callees
         );
     }
