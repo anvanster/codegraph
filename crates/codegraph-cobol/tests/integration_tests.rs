@@ -279,3 +279,91 @@ fn test_cobol_programming_course() {
         "Expected >=5 COBOL files, got {total_files}"
     );
 }
+
+#[test]
+fn test_aws_carddemo_cobol() {
+    use codegraph::CodeGraph;
+    use codegraph_cobol::CobolParser;
+    use codegraph_parser_api::CodeParser;
+
+    let src_dir =
+        std::path::Path::new("/Users/anvanster/projects/docs/aws-mainframe-modernization-carddemo");
+    if !src_dir.exists() {
+        eprintln!("Skipping: aws-mainframe-modernization-carddemo not found");
+        return;
+    }
+
+    let parser = CobolParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let mut total_files = 0u32;
+    let mut total_functions = 0u32;
+    let mut parse_errors = 0u32;
+    let mut error_files = Vec::new();
+
+    fn find_cobol_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    find_cobol_files(&path, files);
+                } else if path.extension().is_some_and(|e| {
+                    let e = e.to_string_lossy().to_lowercase();
+                    matches!(e.as_str(), "cob" | "cbl" | "cpy" | "cobol")
+                }) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    let mut cobol_files = Vec::new();
+    find_cobol_files(src_dir, &mut cobol_files);
+
+    for path in &cobol_files {
+        total_files += 1;
+        match parser.parse_file(path, &mut graph) {
+            Ok(fi) => {
+                total_functions += fi.functions.len() as u32;
+            }
+            Err(e) => {
+                parse_errors += 1;
+                error_files.push((
+                    path.file_name().unwrap().to_string_lossy().to_string(),
+                    format!("{}", e),
+                ));
+            }
+        }
+    }
+
+    eprintln!("\n=== AWS CardDemo (Credit Card Management) ===");
+    eprintln!("Files:     {total_files}");
+    eprintln!("Functions: {total_functions}");
+    eprintln!("Errors:    {parse_errors}");
+    eprintln!("Nodes:     {}", graph.node_count());
+    eprintln!("Edges:     {}", graph.edge_count());
+
+    if !error_files.is_empty() {
+        eprintln!("\nFailed files:");
+        for (name, err) in &error_files {
+            let short = if err.len() > 80 { &err[..80] } else { err };
+            eprintln!("  {name}: {short}");
+        }
+    }
+
+    let success_rate = if total_files > 0 {
+        (total_files - parse_errors) as f64 / total_files as f64
+    } else {
+        0.0
+    };
+    eprintln!("Success:   {:.0}%", success_rate * 100.0);
+
+    assert!(
+        total_files > 50,
+        "Expected >50 COBOL files, got {total_files}"
+    );
+    assert!(
+        success_rate > 0.5,
+        "Less than 50% success rate: {:.0}%",
+        success_rate * 100.0
+    );
+}
