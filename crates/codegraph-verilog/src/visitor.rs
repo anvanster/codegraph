@@ -5,7 +5,8 @@
 //! programs, packages, tasks, functions, instantiations, imports).
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity, ImportRelation,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImportRelation, Parameter,
 };
 use tree_sitter::Node;
 
@@ -34,6 +35,42 @@ impl<'a> VerilogVisitor<'a> {
 
     fn node_text(&self, node: Node) -> String {
         node.utf8_text(self.source).unwrap_or("").to_string()
+    }
+
+    /// Extract parameters from a function_body_declaration or task_body_declaration.
+    /// AST: body_declaration → tf_port_list → tf_port_item1 → port_identifier → simple_identifier
+    fn extract_tf_parameters(&self, body_node: Node) -> Vec<Parameter> {
+        let mut cursor = body_node.walk();
+        let port_list = body_node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "tf_port_list");
+
+        let Some(port_list) = port_list else {
+            return Vec::new();
+        };
+
+        let mut params = Vec::new();
+        let mut pl_cursor = port_list.walk();
+        for item in port_list.children(&mut pl_cursor) {
+            if !item.kind().starts_with("tf_port_item") {
+                continue;
+            }
+            // Find port_identifier → simple_identifier for the name
+            let mut ic = item.walk();
+            let name = item
+                .children(&mut ic)
+                .find(|c| c.kind() == "port_identifier")
+                .and_then(|pi| self.find_identifier_in(pi));
+            if let Some(name) = name {
+                params.push(Parameter {
+                    name,
+                    type_annotation: None,
+                    default_value: None,
+                    is_variadic: false,
+                });
+            }
+        }
+        params
     }
 
     /// Find the first simple_identifier or escaped_identifier child
@@ -254,12 +291,13 @@ impl<'a> VerilogVisitor<'a> {
 
     fn visit_function(&mut self, node: Node) {
         // function_declaration -> function_body_declaration -> function_identifier -> simple_identifier
-        let name = {
-            let mut cursor = node.walk();
-            let body = node
-                .children(&mut cursor)
-                .find(|c| c.kind() == "function_body_declaration");
-            body.and_then(|b| {
+        let mut cursor = node.walk();
+        let body = node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "function_body_declaration");
+
+        let name = body
+            .and_then(|b| {
                 let mut bc = b.walk();
                 let func_id = b
                     .children(&mut bc)
@@ -267,8 +305,11 @@ impl<'a> VerilogVisitor<'a> {
                 func_id.and_then(|fi| self.find_identifier_in(fi))
             })
             .or_else(|| self.find_identifier_recursive(node, 4))
-            .unwrap_or_else(|| "unknown_function".to_string())
-        };
+            .unwrap_or_else(|| "unknown_function".to_string());
+
+        let parameters = body
+            .map(|b| self.extract_tf_parameters(b))
+            .unwrap_or_default();
 
         let prev_function = self.current_function.clone();
         self.current_function = Some(name.clone());
@@ -290,7 +331,7 @@ impl<'a> VerilogVisitor<'a> {
             is_test: false,
             is_static: false,
             is_abstract: false,
-            parameters: Vec::new(),
+            parameters,
             return_type: None,
             doc_comment: None,
             attributes: Vec::new(),
@@ -304,19 +345,23 @@ impl<'a> VerilogVisitor<'a> {
 
     fn visit_task(&mut self, node: Node) {
         // task_declaration -> task_body_declaration -> task_identifier -> simple_identifier
-        let name = {
-            let mut cursor = node.walk();
-            let body = node
-                .children(&mut cursor)
-                .find(|c| c.kind() == "task_body_declaration");
-            body.and_then(|b| {
+        let mut cursor = node.walk();
+        let body = node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "task_body_declaration");
+
+        let name = body
+            .and_then(|b| {
                 let mut bc = b.walk();
                 let task_id = b.children(&mut bc).find(|c| c.kind() == "task_identifier");
                 task_id.and_then(|ti| self.find_identifier_in(ti))
             })
             .or_else(|| self.find_identifier_recursive(node, 4))
-            .unwrap_or_else(|| "unknown_task".to_string())
-        };
+            .unwrap_or_else(|| "unknown_task".to_string());
+
+        let parameters = body
+            .map(|b| self.extract_tf_parameters(b))
+            .unwrap_or_default();
 
         let prev_function = self.current_function.clone();
         self.current_function = Some(name.clone());
@@ -338,7 +383,7 @@ impl<'a> VerilogVisitor<'a> {
             is_test: false,
             is_static: false,
             is_abstract: false,
-            parameters: Vec::new(),
+            parameters,
             return_type: None,
             doc_comment: None,
             attributes: Vec::new(),
@@ -598,6 +643,53 @@ mod tests {
             !visitor.functions.is_empty(),
             "Expected at least one function"
         );
+    }
+
+    #[test]
+    fn test_function_parameter_extraction() {
+        use tree_sitter::Parser;
+        let source = b"module top();
+  function automatic int add(input int a, input int b);
+    return a + b;
+  endfunction
+endmodule";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let params: Vec<&str> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(params, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_task_parameter_extraction() {
+        use tree_sitter::Parser;
+        let source = b"module top();
+  task my_task(input logic clk, output logic [7:0] data, inout wire en);
+  endtask
+endmodule";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_verilog::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = VerilogVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let params: Vec<&str> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(params, vec!["clk", "data", "en"]);
     }
 
     #[test]
