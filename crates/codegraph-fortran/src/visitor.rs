@@ -117,6 +117,9 @@ impl<'a> FortranVisitor<'a> {
             "call_expression" => {
                 self.visit_call_expression(node);
             }
+            "include_statement" => {
+                self.visit_include_statement(node);
+            }
             _ => {}
         }
 
@@ -340,6 +343,9 @@ impl<'a> FortranVisitor<'a> {
 
     fn visit_call_expression(&mut self, node: Node) {
         // call_expression has a `function` field of type `identifier`
+        // Note: In Fortran, array indexing `x(i)` is syntactically identical to
+        // a function call `f(x)`. We filter out intrinsic functions and likely
+        // array accesses to reduce noise.
         let callee = {
             let mut cursor = node.walk();
             let func_child = node
@@ -351,6 +357,11 @@ impl<'a> FortranVisitor<'a> {
         };
 
         if let Some(name) = callee {
+            let lower = name.to_lowercase();
+            // Skip Fortran intrinsic functions and likely array accesses
+            if is_fortran_intrinsic(&lower) {
+                return;
+            }
             let caller = self
                 .current_function
                 .clone()
@@ -361,6 +372,44 @@ impl<'a> FortranVisitor<'a> {
                 name,
                 node.start_position().row + 1,
             ));
+        }
+    }
+
+    /// Extract INCLUDE 'filename' as an import relationship.
+    /// Fortran's INCLUDE is similar to C's #include — it textually includes
+    /// the contents of another file.
+    fn visit_include_statement(&mut self, node: Node) {
+        let text = self.node_text(node);
+        // INCLUDE 'filename' or INCLUDE "filename"
+        let name = text
+            .trim()
+            .strip_prefix("include")
+            .or_else(|| text.trim().strip_prefix("INCLUDE"))
+            .and_then(|rest| {
+                let rest = rest.trim();
+                if (rest.starts_with('\'') && rest.ends_with('\''))
+                    || (rest.starts_with('"') && rest.ends_with('"'))
+                {
+                    Some(rest[1..rest.len() - 1].to_string())
+                } else {
+                    None
+                }
+            });
+
+        if let Some(name) = name {
+            if !name.is_empty() {
+                self.imports.push(ImportRelation {
+                    importer: self
+                        .current_unit
+                        .clone()
+                        .or_else(|| self.current_function.clone())
+                        .unwrap_or_else(|| "file".to_string()),
+                    imported: name,
+                    symbols: Vec::new(),
+                    is_wildcard: true,
+                    alias: None,
+                });
+            }
         }
     }
 
@@ -409,6 +458,53 @@ impl<'a> FortranVisitor<'a> {
             _ => {}
         }
     }
+}
+
+/// Check if a lowercase name is a Fortran intrinsic function or a likely
+/// array access (single letter). These produce `call_expression` nodes in
+/// tree-sitter but are not user-defined procedures.
+fn is_fortran_intrinsic(name: &str) -> bool {
+    // Single-letter names are almost always array/variable accesses, not calls
+    if name.len() == 1 {
+        return true;
+    }
+    matches!(
+        name,
+        // Numeric / math
+        "abs" | "acos" | "acosh" | "aimag" | "aint" | "anint" | "asin" | "asinh"
+        | "atan" | "atan2" | "atanh" | "ceiling" | "cmplx" | "conjg" | "cos"
+        | "cosh" | "dble" | "dim" | "dprod" | "exp" | "floor" | "fraction"
+        | "huge" | "hypot" | "int" | "log" | "log10" | "log_gamma" | "max"
+        | "min" | "mod" | "modulo" | "nearest" | "nint" | "real" | "rrspacing"
+        | "scale" | "set_exponent" | "sign" | "sin" | "sinh" | "spacing"
+        | "sqrt" | "tan" | "tanh" | "tiny"
+        // Array / matrix
+        | "all" | "any" | "count" | "cshift" | "dot_product" | "eoshift"
+        | "lbound" | "matmul" | "maxloc" | "maxval" | "merge" | "minloc"
+        | "minval" | "norm2" | "pack" | "product" | "reshape" | "shape"
+        | "size" | "spread" | "sum" | "transpose" | "ubound" | "unpack"
+        // String
+        | "achar" | "adjustl" | "adjustr" | "char" | "iachar" | "ichar"
+        | "index" | "len" | "len_trim" | "lge" | "lgt" | "lle" | "llt"
+        | "repeat" | "scan" | "trim" | "verify"
+        // Type / conversion
+        | "allocated" | "associated" | "bit_size" | "digits" | "epsilon"
+        | "exponent" | "kind" | "logical" | "maxexponent" | "minexponent"
+        | "precision" | "present" | "radix" | "range" | "selected_int_kind"
+        | "selected_real_kind" | "storage_size" | "transfer"
+        // Bit manipulation
+        | "bge" | "bgt" | "ble" | "blt" | "dshiftl" | "dshiftr" | "iand"
+        | "ibclr" | "ibits" | "ibset" | "ieor" | "ior" | "ishft" | "ishftc"
+        | "leadz" | "maskl" | "maskr" | "merge_bits" | "mvbits" | "not"
+        | "popcnt" | "poppar" | "shifta" | "shiftl" | "shiftr" | "trailz"
+        // System / misc
+        | "command_argument_count" | "cpu_time" | "date_and_time"
+        | "get_command" | "get_command_argument" | "get_environment_variable"
+        | "is_iostat_end" | "is_iostat_eor" | "move_alloc" | "new_line"
+        | "null" | "system_clock"
+        // Statements sometimes parsed as call_expression
+        | "allocate" | "deallocate" | "c_f_pointer" | "c_loc" | "c_funloc"
+    )
 }
 
 #[cfg(test)]

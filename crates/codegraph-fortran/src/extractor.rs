@@ -22,15 +22,11 @@ pub fn extract(
         ParserError::ParseError(file_path.to_path_buf(), "Failed to parse".to_string())
     })?;
 
+    // Note: NOT checking root_node.has_error() — Fortran code often uses
+    // preprocessor directives (#include, #ifdef) and dialect extensions that
+    // produce partial error nodes in the grammar while still containing
+    // extractable entities.
     let root_node = tree.root_node();
-    if root_node.has_error() {
-        return Err(ParserError::SyntaxError(
-            file_path.to_path_buf(),
-            0,
-            0,
-            "Syntax error in Fortran source".to_string(),
-        ));
-    }
 
     let mut ir = CodeIR::new(file_path.to_path_buf());
 
@@ -140,12 +136,35 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_with_syntax_error() {
-        // Deliberately broken Fortran (unmatched keywords)
+    fn test_extract_with_syntax_error_does_not_fail() {
+        // Deliberately broken Fortran — should not return Err
         let source = "program broken\n  integer :: x\n  if (x > 0\nend program broken\n";
         let config = ParserConfig::default();
         let result = extract(source, Path::new("broken.f90"), &config);
-        // tree-sitter may or may not produce an error node — just ensure no panic
-        let _ = result;
+        // With has_error() check removed, this should succeed (not Err)
+        // even if the AST is partial and few entities are extracted
+        assert!(result.is_ok(), "Should not fail on syntax errors");
+    }
+
+    #[test]
+    fn test_extract_with_preprocessor_directives() {
+        // Fortran with C preprocessor directives (common in scientific code)
+        let source = concat!(
+            "#ifdef USE_MPI\n",
+            "  use mpi\n",
+            "#endif\n",
+            "program preproc\n",
+            "  implicit none\n",
+            "  call do_work()\n",
+            "end program preproc\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("preproc.f90"), &config);
+        // Should not fail entirely due to preprocessor directives
+        assert!(
+            result.is_ok(),
+            "Should handle preprocessor directives: {:?}",
+            result.err()
+        );
     }
 }

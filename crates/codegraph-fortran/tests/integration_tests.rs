@@ -139,10 +139,8 @@ fn test_call_statement() {
     let info = parser()
         .parse_source(src, Path::new("main.f90"), &mut g)
         .unwrap();
-    assert!(!info.functions.is_empty() || !info.classes.is_empty() || true);
-    // The key check: call relation should be in the graph
-    // (info.functions only tracks defined functions, not calls;
-    //  we check that parse succeeded without error)
+    // parse_source succeeded without error — call relations are in the graph
+    let _ = info;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +237,7 @@ fn test_line_and_byte_count() {
 
 #[test]
 fn test_fortran_astrodynamics_toolkit() {
-    use codegraph::{CodeGraph, NodeType};
+    use codegraph::CodeGraph;
     use codegraph_fortran::{CodeParser, FortranParser};
 
     let src_dir =
@@ -302,4 +300,103 @@ fn test_fortran_astrodynamics_toolkit() {
     assert!(total_files > 20, "Expected >20 Fortran files");
     assert!(total_functions > 50, "Expected >50 functions");
     assert!(success_rate > 0.5, "Less than 50% success rate");
+}
+
+#[test]
+fn test_fortran_graph_quality() {
+    use codegraph::{CodeGraph, EdgeType, NodeType};
+    use codegraph_fortran::{CodeParser, FortranParser};
+
+    let src_dir =
+        std::path::Path::new("/Users/anvanster/projects/docs/Fortran-Astrodynamics-Toolkit/src");
+    if !src_dir.exists() {
+        eprintln!("Skipping: not found");
+        return;
+    }
+
+    let parser = FortranParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+
+    fn find_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    find_files(&path, files);
+                } else if path
+                    .extension()
+                    .is_some_and(|e| e.to_string_lossy().to_lowercase() == "f90")
+                {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    let mut files = Vec::new();
+    find_files(src_dir, &mut files);
+    for f in &files {
+        let _ = parser.parse_file(f, &mut graph);
+    }
+
+    // Count by type
+    let mut functions = 0u32;
+    let mut modules = 0u32;
+    let mut code_files = 0u32;
+    let mut calls_edges = 0u32;
+    let mut import_edges = 0u32;
+    let mut contains_edges = 0u32;
+    let mut unresolved_count = 0u32;
+
+    for (_, node) in graph.iter_nodes() {
+        match node.node_type {
+            NodeType::Function => functions += 1,
+            NodeType::Class => modules += 1,
+            NodeType::CodeFile => code_files += 1,
+            _ => {}
+        }
+        if let Some(calls) = node.properties.get_string_list_compat("unresolved_calls") {
+            unresolved_count += calls.len() as u32;
+        }
+    }
+    for (_eid, edge) in graph.iter_edges() {
+        match edge.edge_type {
+            EdgeType::Calls => calls_edges += 1,
+            EdgeType::Imports => import_edges += 1,
+            EdgeType::Contains => contains_edges += 1,
+            _ => {}
+        }
+    }
+
+    // Collect unresolved call frequency
+    let mut freq: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for (_, node) in graph.iter_nodes() {
+        if let Some(calls) = node.properties.get_string_list_compat("unresolved_calls") {
+            for c in calls {
+                *freq.entry(c.to_lowercase()).or_default() += 1;
+            }
+        }
+    }
+    let mut sorted: Vec<_> = freq.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1));
+
+    eprintln!("\n=== Fortran Graph Quality ===");
+    eprintln!("Function nodes:    {functions}");
+    eprintln!("Module nodes:      {modules}");
+    eprintln!("CodeFile nodes:    {code_files}");
+    eprintln!("Calls edges:       {calls_edges}");
+    eprintln!("Import edges:      {import_edges}");
+    eprintln!("Contains edges:    {contains_edges}");
+    eprintln!("Unresolved calls:  {unresolved_count}");
+    eprintln!("Unique unresolved: {}", freq.len());
+    eprintln!("\nTop 30 unresolved:");
+    for (name, count) in sorted.iter().take(30) {
+        eprintln!("  {count:4}x  {name}");
+    }
+
+    assert!(functions > 200, "Expected >200 functions");
+    assert!(
+        calls_edges > 0 || unresolved_count > 100,
+        "Expected call relationships"
+    );
+    assert!(import_edges > 50, "Expected >50 import edges");
 }
