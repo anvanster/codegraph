@@ -239,7 +239,9 @@ class Foo {
         assert!(result.is_ok());
         let ir = result.unwrap();
         assert!(
-            ir.calls.iter().any(|c| c.caller == "bar" && c.callee == "baz"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "bar" && c.callee == "baz"),
             "Expected call bar -> baz"
         );
     }
@@ -261,11 +263,15 @@ fun process() {}
         assert!(result.is_ok());
         let ir = result.unwrap();
         assert!(
-            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "helper"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "caller" && c.callee == "helper"),
             "Expected call caller -> helper"
         );
         assert!(
-            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "process"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "caller" && c.callee == "process"),
             "Expected call caller -> process"
         );
     }
@@ -282,6 +288,9 @@ fun add(a: Int, b: Int): Int {
 
         assert!(result.is_ok());
         let ir = result.unwrap();
-        assert!(ir.calls.is_empty(), "No calls expected in pure arithmetic function");
+        assert!(
+            ir.calls.is_empty(),
+            "No calls expected in pure arithmetic function"
+        );
     }
 }

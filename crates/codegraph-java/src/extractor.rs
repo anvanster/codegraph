@@ -278,11 +278,15 @@ public class Service {
         let ir = result.unwrap();
         assert!(!ir.calls.is_empty());
         assert!(
-            ir.calls.iter().any(|c| c.caller == "doWork" && c.callee == "helper"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "doWork" && c.callee == "helper"),
             "Expected call doWork -> helper"
         );
         assert!(
-            ir.calls.iter().any(|c| c.caller == "doWork" && c.callee == "process"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "doWork" && c.callee == "process"),
             "Expected call doWork -> process"
         );
     }
@@ -303,11 +307,15 @@ public class MathHelper {
         assert!(result.is_ok());
         let ir = result.unwrap();
         assert!(
-            ir.calls.iter().any(|c| c.caller == "calculate" && c.callee == "Math.abs"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "calculate" && c.callee == "Math.abs"),
             "Expected call calculate -> Math.abs"
         );
         assert!(
-            ir.calls.iter().any(|c| c.caller == "calculate" && c.callee == "Helper.format"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "calculate" && c.callee == "Helper.format"),
             "Expected call calculate -> Helper.format"
         );
     }
@@ -328,11 +336,15 @@ public class Factory {
         assert!(result.is_ok());
         let ir = result.unwrap();
         assert!(
-            ir.calls.iter().any(|c| c.caller == "create" && c.callee == "new ArrayList"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "create" && c.callee == "new ArrayList"),
             "Expected call create -> new ArrayList"
         );
         assert!(
-            ir.calls.iter().any(|c| c.caller == "create" && c.callee == "new HashMap"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "create" && c.callee == "new HashMap"),
             "Expected call create -> new HashMap"
         );
     }
@@ -351,6 +363,9 @@ public class Pure {
 
         assert!(result.is_ok());
         let ir = result.unwrap();
-        assert!(ir.calls.is_empty(), "No calls expected in pure arithmetic method");
+        assert!(
+            ir.calls.is_empty(),
+            "No calls expected in pure arithmetic method"
+        );
     }
 }

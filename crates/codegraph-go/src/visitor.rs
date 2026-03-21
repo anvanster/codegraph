@@ -8,9 +8,27 @@ use tree_sitter::Node;
 
 /// Built-in Go primitive types — not recorded as type references
 const GO_PRIMITIVES: &[&str] = &[
-    "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
-    "uintptr", "float32", "float64", "complex64", "complex128", "bool", "byte", "rune", "string",
-    "error", "any",
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uintptr",
+    "float32",
+    "float64",
+    "complex64",
+    "complex128",
+    "bool",
+    "byte",
+    "rune",
+    "string",
+    "error",
+    "any",
 ];
 
 pub struct GoVisitor<'a> {
@@ -1061,7 +1079,8 @@ func handle(x int, ch chan int) {
     fn test_type_refs_from_function_params() {
         use tree_sitter::Parser;
 
-        let source = b"package main\ntype Config struct{}\nfunc setup(cfg Config) error { return nil }";
+        let source =
+            b"package main\ntype Config struct{}\nfunc setup(cfg Config) error { return nil }";
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
@@ -1143,8 +1162,7 @@ func handle(x int, ch chan int) {
     fn test_type_refs_pointer_type() {
         use tree_sitter::Parser;
 
-        let source =
-            b"package main\ntype Node struct{}\nfunc process(n *Node) *Node { return n }";
+        let source = b"package main\ntype Node struct{}\nfunc process(n *Node) *Node { return n }";
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_go::language()).unwrap();
         let tree = parser.parse(source, None).unwrap();

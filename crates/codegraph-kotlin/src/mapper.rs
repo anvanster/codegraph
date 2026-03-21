@@ -592,7 +592,10 @@ mod tests {
         let file_info = result.unwrap();
         let caller_node = graph.get_node(file_info.functions[0]).unwrap();
         let unresolved = caller_node.properties.get("unresolved_calls");
-        assert!(unresolved.is_some(), "Expected unresolved_calls property on caller");
+        assert!(
+            unresolved.is_some(),
+            "Expected unresolved_calls property on caller"
+        );
         if let Some(PropertyValue::StringList(list)) = unresolved {
             assert!(list.contains(&"external_fn".to_string()));
         } else {

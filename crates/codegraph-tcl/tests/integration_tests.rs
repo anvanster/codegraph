@@ -25,7 +25,11 @@ proc caller {} {
 "#;
 
     let result = parser.parse_source(source, Path::new("test.tcl"), &mut graph);
-    assert!(result.is_ok(), "Failed to parse Tcl source: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse Tcl source: {:?}",
+        result.err()
+    );
 
     // 'caller' function should be present in the graph
     let caller_id = graph

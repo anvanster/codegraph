@@ -249,18 +249,27 @@ end
 
         // caller -> helper
         assert!(
-            ir.calls.iter().any(|c| c.caller == "caller" && c.callee == "helper"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "caller" && c.callee == "helper"),
             "Expected caller -> helper call, got: {:?}",
-            ir.calls.iter().map(|c| format!("{}->{}", c.caller, c.callee)).collect::<Vec<_>>()
+            ir.calls
+                .iter()
+                .map(|c| format!("{}->{}", c.caller, c.callee))
+                .collect::<Vec<_>>()
         );
         // process -> validate
         assert!(
-            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "validate"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "process" && c.callee == "validate"),
             "Expected process -> validate call"
         );
         // process -> helper
         assert!(
-            ir.calls.iter().any(|c| c.caller == "process" && c.callee == "helper"),
+            ir.calls
+                .iter()
+                .any(|c| c.caller == "process" && c.callee == "helper"),
             "Expected process -> helper call"
         );
     }

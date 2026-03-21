@@ -156,7 +156,10 @@ proc caller {} {
         assert!(
             ir.calls.iter().any(|c| c.callee == "set"),
             "Expected 'set' to appear as a call, got: {:?}",
-            ir.calls.iter().map(|c| format!("{}->{}", c.caller, c.callee)).collect::<Vec<_>>()
+            ir.calls
+                .iter()
+                .map(|c| format!("{}->{}", c.caller, c.callee))
+                .collect::<Vec<_>>()
         );
     }
 }

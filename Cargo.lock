@@ -264,6 +264,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "codegraph-fortran"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "codegraph",
+ "codegraph-parser-api",
+ "criterion",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-fortran",
+]
+
+[[package]]
 name = "codegraph-go"
 version = "0.1.6"
 dependencies = [
@@ -1107,6 +1124,16 @@ checksum = "1d509a22a992790d38f2c291961ff8a1ff016c437c7ec6befc9220b8eec8918c"
 dependencies = [
  "cc",
  "tree-sitter",
+]
+
+[[package]]
+name = "tree-sitter-fortran"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce58ab374a2cc3a2ff8a5dab2e5230530dbfcb439475afa75233f59d1d115b40"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
 ]
 
 [[package]]
