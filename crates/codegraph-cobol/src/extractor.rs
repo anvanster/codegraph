@@ -59,6 +59,9 @@ pub fn extract(
     // GO TO and EXEC CICS XCTL/LINK
     extract_goto_and_cics(source, &ir.functions, &mut ir.calls);
 
+    // EXEC SQL table references
+    extract_exec_sql(source, &ir.functions, &mut ir.calls);
+
     Ok(ir)
 }
 
@@ -131,6 +134,135 @@ fn extract_cics_program_name(text: &str) -> Option<String> {
     } else {
         Some(name.to_string())
     }
+}
+
+/// Source-level extraction for EXEC SQL embedded SQL statements.
+///
+/// COBOL programs embed SQL via `EXEC SQL ... END-EXEC`. This function
+/// collects multi-line SQL blocks and extracts table names from common
+/// DML patterns (SELECT/FROM, INSERT INTO, UPDATE, DELETE FROM).
+/// Each table reference creates a CallRelation with the callee prefixed
+/// by `SQL:` to distinguish from regular paragraph calls.
+fn extract_exec_sql(source: &str, paragraphs: &[FunctionEntity], calls: &mut Vec<CallRelation>) {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim().to_uppercase();
+
+        // Look for EXEC SQL (but not EXEC CICS or other EXEC variants)
+        if trimmed.contains("EXEC SQL") && !trimmed.contains("EXEC CICS") {
+            let start_line = i + 1; // 1-indexed
+
+            // Accumulate the full SQL block until END-EXEC
+            let mut sql_text = String::new();
+            let mut j = i;
+            loop {
+                let line_upper = lines[j].trim().to_uppercase();
+                sql_text.push(' ');
+                sql_text.push_str(lines[j].trim());
+
+                if line_upper.contains("END-EXEC") {
+                    break;
+                }
+                j += 1;
+                if j >= lines.len() {
+                    break;
+                }
+            }
+
+            // Find which paragraph this EXEC SQL belongs to
+            let caller = paragraphs
+                .iter()
+                .rfind(|p| start_line >= p.line_start && start_line <= p.line_end)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "file".to_string());
+
+            // Extract table names from the accumulated SQL
+            for table in extract_sql_table_names(&sql_text) {
+                calls.push(CallRelation::new(
+                    caller.clone(),
+                    format!("SQL:{table}"),
+                    start_line,
+                ));
+            }
+
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Extract table names from a SQL statement string.
+///
+/// Handles these patterns (case-insensitive):
+/// - `SELECT ... FROM table_name`
+/// - `INSERT INTO table_name`
+/// - `UPDATE table_name`
+/// - `DELETE FROM table_name`
+///
+/// Returns deduplicated table names in uppercase.
+fn extract_sql_table_names(sql: &str) -> Vec<String> {
+    let upper = sql.to_uppercase();
+    let tokens: Vec<&str> = upper.split_whitespace().collect();
+    let mut tables = Vec::new();
+
+    for (idx, token) in tokens.iter().enumerate() {
+        match *token {
+            "FROM" => {
+                // SELECT ... FROM table or DELETE FROM table
+                // Skip if followed by SQL keywords or if it's part of non-DML context
+                if let Some(next) = tokens.get(idx + 1) {
+                    if is_valid_table_name(next) {
+                        tables.push(next.to_string());
+                    }
+                }
+            }
+            "INTO" => {
+                // INSERT INTO table
+                // Check that the previous token is INSERT
+                if idx > 0 && tokens[idx - 1] == "INSERT" {
+                    if let Some(next) = tokens.get(idx + 1) {
+                        if is_valid_table_name(next) {
+                            tables.push(next.to_string());
+                        }
+                    }
+                }
+            }
+            "UPDATE" => {
+                if let Some(next) = tokens.get(idx + 1) {
+                    if is_valid_table_name(next) {
+                        tables.push(next.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Deduplicate while preserving order
+    let mut seen = std::collections::HashSet::new();
+    tables.retain(|t| seen.insert(t.clone()));
+    tables
+}
+
+/// Check if a token looks like a valid SQL table name (not a keyword or punctuation).
+fn is_valid_table_name(token: &str) -> bool {
+    // Strip trailing commas, periods, parentheses
+    let clean = token.trim_matches(|c: char| c == ',' || c == '.' || c == '(' || c == ')');
+    if clean.is_empty() {
+        return false;
+    }
+
+    // Reject SQL keywords that commonly follow FROM/INTO/UPDATE
+    const SQL_KEYWORDS: &[&str] = &[
+        "SELECT", "WHERE", "SET", "VALUES", "INTO", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
+        "CROSS", "ON", "AND", "OR", "NOT", "NULL", "AS", "ORDER", "GROUP", "BY", "HAVING", "UNION",
+        "ALL", "DISTINCT", "EXISTS", "IN", "BETWEEN", "LIKE", "IS", "END-EXEC", "EXEC", "SQL",
+        "WITH", "CURSOR", "FOR", "DECLARE", "OPEN", "CLOSE", "FETCH", "INCLUDE",
+    ];
+    !SQL_KEYWORDS.contains(&clean)
 }
 
 #[cfg(test)]
@@ -358,6 +490,222 @@ mod tests {
             !callees.contains(&"VARYING"),
             "Should NOT extract VARYING as callee. Got: {:?}",
             callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_select() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLTEST.\n",
+            "       procedure division.\n",
+            "       MAIN-PARA.\n",
+            "           EXEC SQL\n",
+            "               SELECT EMPNO, ENAME\n",
+            "               FROM EMPLOYEE\n",
+            "               WHERE DEPTNO = :WS-DEPT\n",
+            "           END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sql.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        eprintln!("SQL calls: {:?}", callees);
+        assert!(
+            callees.contains(&"SQL:EMPLOYEE"),
+            "Expected SQL:EMPLOYEE. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_insert() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLINS.\n",
+            "       procedure division.\n",
+            "       INSERT-PARA.\n",
+            "           EXEC SQL\n",
+            "               INSERT INTO ORDERS\n",
+            "               VALUES (:WS-ID, :WS-AMT)\n",
+            "           END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sqlins.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(
+            callees.contains(&"SQL:ORDERS"),
+            "Expected SQL:ORDERS. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_update() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLUPD.\n",
+            "       procedure division.\n",
+            "       UPDATE-PARA.\n",
+            "           EXEC SQL\n",
+            "               UPDATE CUSTOMER\n",
+            "               SET STATUS = 'A'\n",
+            "               WHERE CUSTID = :WS-ID\n",
+            "           END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sqlupd.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(
+            callees.contains(&"SQL:CUSTOMER"),
+            "Expected SQL:CUSTOMER. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_delete() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLDEL.\n",
+            "       procedure division.\n",
+            "       DELETE-PARA.\n",
+            "           EXEC SQL\n",
+            "               DELETE FROM TEMP_DATA\n",
+            "               WHERE CREATED < :WS-DATE\n",
+            "           END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sqldel.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(
+            callees.contains(&"SQL:TEMP_DATA"),
+            "Expected SQL:TEMP_DATA. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_single_line() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLONE.\n",
+            "       procedure division.\n",
+            "       MAIN-PARA.\n",
+            "           EXEC SQL SELECT COUNT(*) FROM ACCOUNTS END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sqlone.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(
+            callees.contains(&"SQL:ACCOUNTS"),
+            "Expected SQL:ACCOUNTS. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_multiple_tables() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLMULTI.\n",
+            "       procedure division.\n",
+            "       PARA-A.\n",
+            "           EXEC SQL\n",
+            "               SELECT A.ID FROM ORDERS\n",
+            "               WHERE A.ID = :WS-ID\n",
+            "           END-EXEC\n",
+            "       PARA-B.\n",
+            "           EXEC SQL\n",
+            "               UPDATE INVENTORY\n",
+            "               SET QTY = :WS-QTY\n",
+            "           END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sqlmulti.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        eprintln!("Multi-SQL calls: {:?}", callees);
+        assert!(
+            callees.contains(&"SQL:ORDERS"),
+            "Expected SQL:ORDERS. Got: {:?}",
+            callees
+        );
+        assert!(
+            callees.contains(&"SQL:INVENTORY"),
+            "Expected SQL:INVENTORY. Got: {:?}",
+            callees
+        );
+    }
+
+    #[test]
+    fn test_extract_exec_sql_ignores_non_dml() {
+        // EXEC SQL INCLUDE and EXEC SQL DECLARE should not produce table calls
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. SQLMISC.\n",
+            "       procedure division.\n",
+            "       MAIN-PARA.\n",
+            "           EXEC SQL INCLUDE SQLCA END-EXEC\n",
+            "           stop run.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("sqlmisc.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let sql_calls: Vec<&str> = ir
+            .calls
+            .iter()
+            .filter(|c| c.callee.starts_with("SQL:"))
+            .map(|c| c.callee.as_str())
+            .collect();
+        assert!(
+            sql_calls.is_empty(),
+            "EXEC SQL INCLUDE should not produce SQL: calls. Got: {:?}",
+            sql_calls
+        );
+    }
+
+    #[test]
+    fn test_extract_sql_table_names_helper() {
+        assert_eq!(
+            extract_sql_table_names("SELECT A, B FROM MYTABLE WHERE X = 1"),
+            vec!["MYTABLE"]
+        );
+        assert_eq!(
+            extract_sql_table_names("INSERT INTO ORDERS VALUES (1, 2)"),
+            vec!["ORDERS"]
+        );
+        assert_eq!(
+            extract_sql_table_names("UPDATE CUSTOMER SET X = 1"),
+            vec!["CUSTOMER"]
+        );
+        assert_eq!(
+            extract_sql_table_names("DELETE FROM TEMP_DATA WHERE Y = 2"),
+            vec!["TEMP_DATA"]
         );
     }
 }
