@@ -18,6 +18,7 @@ members = [
     "crates/codegraph-swift",
     "crates/codegraph-tcl",
     "crates/codegraph-verilog",
+    "crates/codegraph-fortran",
 ]
 
 [workspace.package]
