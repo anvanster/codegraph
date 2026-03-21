@@ -86,6 +86,10 @@ impl<'a> CobolVisitor<'a> {
                 self.visit_call_statement(node);
                 // fall through to recurse
             }
+            "perform_statement" | "perform_statement_call_proc" => {
+                self.visit_perform_statement(node);
+                // fall through to recurse
+            }
             _ => {}
         }
 
@@ -219,6 +223,43 @@ impl<'a> CobolVisitor<'a> {
                 return;
             }
         }
+    }
+
+    /// Extract PERFORM paragraph-name as a call relationship.
+    /// PERFORM is the primary control flow mechanism in COBOL.
+    ///
+    /// AST: perform_statement_call_proc → perform_procedure → label → qualified_word → WORD
+    fn visit_perform_statement(&mut self, node: Node) {
+        // Find the first WORD in the tree (paragraph name being PERFORMed)
+        if let Some(callee) = self.find_first_word(node) {
+            let callee = callee.trim().to_string();
+            if !callee.is_empty() {
+                let caller = self
+                    .current_paragraph
+                    .clone()
+                    .or_else(|| self.current_program.clone())
+                    .unwrap_or_else(|| "file".to_string());
+                self.calls.push(CallRelation::new(
+                    caller,
+                    callee,
+                    node.start_position().row + 1,
+                ));
+            }
+        }
+    }
+
+    /// Recursively find the first WORD node in a subtree.
+    fn find_first_word(&self, node: Node) -> Option<String> {
+        if node.kind() == "WORD" {
+            return Some(self.node_text(node));
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(word) = self.find_first_word(child) {
+                return Some(word);
+            }
+        }
+        None
     }
 
     fn visit_call_statement(&mut self, node: Node) {

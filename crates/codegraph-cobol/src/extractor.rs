@@ -174,4 +174,54 @@ mod tests {
             names
         );
     }
+
+    #[test]
+    fn test_extract_perform_calls() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. PERFTEST.\n",
+            "       procedure division.\n",
+            "       MAIN-PARA.\n",
+            "           perform INIT-PARA\n",
+            "           perform PROCESS-DATA\n",
+            "           stop run.\n",
+            "       INIT-PARA.\n",
+            "           display 'init'.\n",
+            "       PROCESS-DATA.\n",
+            "           display 'process'.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("perf.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        eprintln!(
+            "Functions: {:?}",
+            ir.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
+        );
+        eprintln!(
+            "Calls: {:?}",
+            ir.calls
+                .iter()
+                .map(|c| format!("{} -> {}", c.caller, c.callee))
+                .collect::<Vec<_>>()
+        );
+
+        assert!(
+            !ir.calls.is_empty(),
+            "Expected PERFORM calls to be extracted"
+        );
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        assert!(
+            callees.contains(&"INIT-PARA"),
+            "Expected PERFORM INIT-PARA. Got: {:?}",
+            callees
+        );
+        assert!(
+            callees.contains(&"PROCESS-DATA"),
+            "Expected PERFORM PROCESS-DATA. Got: {:?}",
+            callees
+        );
+    }
 }
