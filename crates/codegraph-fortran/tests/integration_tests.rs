@@ -236,3 +236,70 @@ fn test_line_and_byte_count() {
     assert_eq!(info.line_count, src.lines().count());
     assert_eq!(info.byte_count, src.len());
 }
+
+#[test]
+fn test_fortran_astrodynamics_toolkit() {
+    use codegraph::{CodeGraph, NodeType};
+    use codegraph_fortran::{CodeParser, FortranParser};
+
+    let src_dir =
+        std::path::Path::new("/Users/anvanster/projects/docs/Fortran-Astrodynamics-Toolkit/src");
+    if !src_dir.exists() {
+        eprintln!("Skipping: Fortran-Astrodynamics-Toolkit not found");
+        return;
+    }
+
+    let parser = FortranParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let mut total_files = 0u32;
+    let mut total_functions = 0u32;
+    let mut parse_errors = 0u32;
+
+    fn find_fortran_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    find_fortran_files(&path, files);
+                } else if path.extension().is_some_and(|e| {
+                    let e = e.to_string_lossy().to_lowercase();
+                    matches!(e.as_str(), "f90" | "f95" | "f03" | "f08" | "f" | "for")
+                }) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    let mut fortran_files = Vec::new();
+    find_fortran_files(src_dir, &mut fortran_files);
+
+    for path in &fortran_files {
+        total_files += 1;
+        match parser.parse_file(path, &mut graph) {
+            Ok(fi) => total_functions += fi.functions.len() as u32,
+            Err(e) => {
+                parse_errors += 1;
+                eprintln!(
+                    "  FAIL: {}: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    e
+                );
+            }
+        }
+    }
+
+    eprintln!("\n=== Fortran Astrodynamics Toolkit ===");
+    eprintln!("Files:     {total_files}");
+    eprintln!("Functions: {total_functions}");
+    eprintln!("Errors:    {parse_errors}");
+    eprintln!("Nodes:     {}", graph.node_count());
+    eprintln!("Edges:     {}", graph.edge_count());
+
+    let success_rate = (total_files - parse_errors) as f64 / total_files as f64;
+    eprintln!("Success:   {:.0}%", success_rate * 100.0);
+
+    assert!(total_files > 20, "Expected >20 Fortran files");
+    assert!(total_functions > 50, "Expected >50 functions");
+    assert!(success_rate > 0.5, "Less than 50% success rate");
+}

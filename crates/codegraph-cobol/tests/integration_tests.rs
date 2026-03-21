@@ -205,3 +205,77 @@ fn test_paragraph_linked_to_program() {
         "Paragraph should be linked to LINKED program"
     );
 }
+
+#[test]
+fn test_cobol_programming_course() {
+    use codegraph::CodeGraph;
+    use codegraph_cobol::CobolParser;
+    use codegraph_parser_api::CodeParser;
+
+    let src_dir = std::path::Path::new("/Users/anvanster/projects/docs/cobol-programming-course");
+    if !src_dir.exists() {
+        eprintln!("Skipping: cobol-programming-course not found");
+        return;
+    }
+
+    let parser = CobolParser::new();
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let mut total_files = 0u32;
+    let mut total_functions = 0u32;
+    let mut parse_errors = 0u32;
+
+    fn find_cobol_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    find_cobol_files(&path, files);
+                } else if path.extension().is_some_and(|e| {
+                    let e = e.to_string_lossy().to_lowercase();
+                    matches!(e.as_str(), "cob" | "cbl" | "cpy" | "cobol")
+                }) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    let mut cobol_files = Vec::new();
+    find_cobol_files(src_dir, &mut cobol_files);
+
+    for path in &cobol_files {
+        total_files += 1;
+        match parser.parse_file(path, &mut graph) {
+            Ok(fi) => {
+                total_functions += fi.functions.len() as u32;
+            }
+            Err(e) => {
+                parse_errors += 1;
+                eprintln!(
+                    "  FAIL: {}: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    e
+                );
+            }
+        }
+    }
+
+    eprintln!("\n=== COBOL Programming Course ===");
+    eprintln!("Files:     {total_files}");
+    eprintln!("Functions: {total_functions}");
+    eprintln!("Errors:    {parse_errors}");
+    eprintln!("Nodes:     {}", graph.node_count());
+    eprintln!("Edges:     {}", graph.edge_count());
+
+    let success_rate = if total_files > 0 {
+        (total_files - parse_errors) as f64 / total_files as f64
+    } else {
+        0.0
+    };
+    eprintln!("Success:   {:.0}%", success_rate * 100.0);
+
+    assert!(
+        total_files >= 5,
+        "Expected >=5 COBOL files, got {total_files}"
+    );
+}
