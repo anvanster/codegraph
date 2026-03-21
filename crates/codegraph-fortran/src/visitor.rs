@@ -5,7 +5,8 @@
 //! relationships.
 
 use codegraph_parser_api::{
-    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity, ImportRelation,
+    CallRelation, ClassEntity, ComplexityBuilder, ComplexityMetrics, FunctionEntity,
+    ImportRelation, Parameter,
 };
 use tree_sitter::Node;
 
@@ -57,6 +58,30 @@ impl<'a> FortranVisitor<'a> {
             }
         }
         None
+    }
+
+    /// Extract parameter names from a subroutine_statement or function_statement node.
+    /// The statement has `parameters: (parameters (identifier) ...)`.
+    fn extract_parameters(&self, stmt_node: Node) -> Vec<Parameter> {
+        let mut cursor = stmt_node.walk();
+        for child in stmt_node.children(&mut cursor) {
+            if child.kind() == "parameters" {
+                let mut params = Vec::new();
+                let mut inner = child.walk();
+                for param in child.children(&mut inner) {
+                    if param.kind() == "identifier" {
+                        params.push(Parameter {
+                            name: self.node_text(param),
+                            type_annotation: None,
+                            default_value: None,
+                            is_variadic: false,
+                        });
+                    }
+                }
+                return params;
+            }
+        }
+        Vec::new()
     }
 
     /// Extract name from the first statement child of a program unit.
@@ -200,6 +225,15 @@ impl<'a> FortranVisitor<'a> {
     fn visit_subroutine(&mut self, node: Node) {
         let name = self.extract_unit_name(node, "subroutine_statement");
 
+        // Extract parameters from subroutine_statement
+        let parameters = {
+            let mut cursor = node.walk();
+            let stmt = node
+                .children(&mut cursor)
+                .find(|c| c.kind() == "subroutine_statement");
+            stmt.map(|s| self.extract_parameters(s)).unwrap_or_default()
+        };
+
         let prev_function = self.current_function.clone();
         self.current_function = Some(name.clone());
 
@@ -220,7 +254,7 @@ impl<'a> FortranVisitor<'a> {
             is_test: false,
             is_static: false,
             is_abstract: false,
-            parameters: Vec::new(),
+            parameters,
             return_type: None,
             doc_comment: None,
             attributes: Vec::new(),
@@ -241,6 +275,15 @@ impl<'a> FortranVisitor<'a> {
     fn visit_function(&mut self, node: Node) {
         let name = self.extract_unit_name(node, "function_statement");
 
+        // Extract parameters from function_statement
+        let parameters = {
+            let mut cursor = node.walk();
+            let stmt = node
+                .children(&mut cursor)
+                .find(|c| c.kind() == "function_statement");
+            stmt.map(|s| self.extract_parameters(s)).unwrap_or_default()
+        };
+
         let prev_function = self.current_function.clone();
         self.current_function = Some(name.clone());
 
@@ -261,7 +304,7 @@ impl<'a> FortranVisitor<'a> {
             is_test: false,
             is_static: false,
             is_abstract: false,
-            parameters: Vec::new(),
+            parameters,
             return_type: None,
             doc_comment: None,
             attributes: Vec::new(),
@@ -566,6 +609,13 @@ mod tests {
             "Expected at least one subroutine"
         );
         assert_eq!(visitor.functions[0].name.to_lowercase(), "greet");
+        // Verify parameter extraction in basic test too
+        let params: Vec<String> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        assert_eq!(params, vec!["name"]);
     }
 
     #[test]
@@ -585,6 +635,13 @@ mod tests {
             "Expected at least one function"
         );
         assert_eq!(visitor.functions[0].name.to_lowercase(), "add");
+        // Verify parameter extraction in basic test too
+        let params: Vec<String> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        assert_eq!(params, vec!["a", "b"]);
     }
 
     #[test]
@@ -621,5 +678,86 @@ mod tests {
 
         assert!(!visitor.calls.is_empty(), "Expected call relation");
         assert_eq!(visitor.calls[0].callee.to_lowercase(), "greet");
+    }
+
+    #[test]
+    fn test_subroutine_parameter_extraction() {
+        use tree_sitter::Parser;
+        let source =
+            b"subroutine greet(name, age)\n  character(*), intent(in) :: name\n  integer, intent(in) :: age\nend subroutine greet\n";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_fortran::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = FortranVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let params: Vec<String> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        assert_eq!(params, vec!["name", "age"]);
+    }
+
+    #[test]
+    fn test_function_parameter_extraction() {
+        use tree_sitter::Parser;
+        let source =
+            b"function add(a, b) result(res)\n  integer :: a, b, res\n  res = a + b\nend function add\n";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_fortran::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = FortranVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let params: Vec<String> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        assert_eq!(params, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn test_subroutine_no_parameters() {
+        use tree_sitter::Parser;
+        let source = b"subroutine init()\nend subroutine init\n";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_fortran::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = FortranVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        assert!(
+            visitor.functions[0].parameters.is_empty(),
+            "Expected no parameters for parameterless subroutine"
+        );
+    }
+
+    #[test]
+    fn test_function_single_parameter() {
+        use tree_sitter::Parser;
+        let source =
+            b"function square(x)\n  real :: x, square\n  square = x * x\nend function square\n";
+        let mut parser = Parser::new();
+        parser.set_language(&crate::ts_fortran::language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let mut visitor = FortranVisitor::new(source);
+        visitor.visit_node(tree.root_node());
+
+        assert_eq!(visitor.functions.len(), 1);
+        let params: Vec<String> = visitor.functions[0]
+            .parameters
+            .iter()
+            .map(|p| p.name.to_lowercase())
+            .collect();
+        assert_eq!(params, vec!["x"]);
     }
 }
