@@ -36,8 +36,11 @@ static bool start_with_word( TSLexer *lexer, char *words[], int number_of_words)
         lexer->advance(lexer, true);
     }
 
-    char *keyword_pointer[number_of_words];
-    bool continue_check[number_of_words];
+    // Use fixed max size instead of VLA for MSVC compatibility
+    #define MAX_WORDS 16
+    char *keyword_pointer[MAX_WORDS];
+    bool continue_check[MAX_WORDS];
+    if (number_of_words > MAX_WORDS) number_of_words = MAX_WORDS;
     for(int i=0; i<number_of_words; ++i) {
         keyword_pointer[i] = words[i];
         continue_check[i] = true;
