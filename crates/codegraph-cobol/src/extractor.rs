@@ -327,4 +327,37 @@ mod tests {
             callees
         );
     }
+
+    #[test]
+    fn test_extract_perform_varying() {
+        let source = concat!(
+            "       identification division.\n",
+            "       program-id. VARTEST.\n",
+            "       procedure division.\n",
+            "       MAIN-PARA.\n",
+            "           perform PROCESS-LOOP varying WS-I from 1 by 1\n",
+            "              until WS-I > 10\n",
+            "           stop run.\n",
+            "       PROCESS-LOOP.\n",
+            "           display 'hello'.\n",
+        );
+        let config = ParserConfig::default();
+        let result = extract(source, Path::new("vary.cob"), &config);
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let ir = result.unwrap();
+
+        let callees: Vec<&str> = ir.calls.iter().map(|c| c.callee.as_str()).collect();
+        eprintln!("PERFORM VARYING calls: {:?}", callees);
+
+        assert!(
+            callees.contains(&"PROCESS-LOOP"),
+            "Expected PERFORM target PROCESS-LOOP, not VARYING/WS-I. Got: {:?}",
+            callees
+        );
+        assert!(
+            !callees.contains(&"VARYING"),
+            "Should NOT extract VARYING as callee. Got: {:?}",
+            callees
+        );
+    }
 }
