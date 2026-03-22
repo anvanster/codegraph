@@ -22,16 +22,10 @@ pub fn extract(
         ParserError::ParseError(file_path.to_path_buf(), "Failed to parse".to_string())
     })?;
 
+    // Note: NOT checking root_node.has_error() — C++ files with complex macros,
+    // platform-specific extensions, or missing includes often produce partial
+    // error nodes while still containing extractable entities.
     let root_node = tree.root_node();
-
-    if root_node.has_error() {
-        return Err(ParserError::SyntaxError(
-            file_path.to_path_buf(),
-            0,
-            0,
-            "Syntax error".to_string(),
-        ));
-    }
 
     let mut ir = CodeIR::new(file_path.to_path_buf());
 
