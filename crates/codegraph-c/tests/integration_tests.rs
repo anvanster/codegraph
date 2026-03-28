@@ -1664,3 +1664,69 @@ fn test_vtable_detection_on_vmware_fsops() {
         vtable_targets
     );
 }
+
+#[test]
+fn test_stdint_call_extraction() {
+    use codegraph::CodeGraph;
+    use codegraph_c::CParser;
+    use std::path::Path;
+
+    let source = r#"
+#include "hw_common.h"
+#include <stdio.h>
+
+int driver_probe(void) {
+    int ret = hw_init(NULL);
+    if (ret < 0) {
+        printf("failed\n");
+        return ret;
+    }
+    return 0;
+}
+
+int driver_set_mtu(uint32_t mtu) {
+    hw_reset();
+    return hw_init(NULL);
+}
+"#;
+
+    let path = Path::new("/tmp/test_driver.c");
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let _info = parser.parse_source(source, path, &mut graph).unwrap();
+
+    // Print all nodes
+    for (id, node) in graph.iter_nodes() {
+        let name = node.properties.get_string("name").unwrap_or("?");
+        println!("Node {}: {:?} name={}", id, node.node_type, name);
+    }
+
+    // Check that calls were extracted
+    let mut found_calls = Vec::new();
+    for (_, edge) in graph.iter_edges() {
+        if edge.edge_type == codegraph::EdgeType::Calls {
+            let src = graph.get_node(edge.source_id).unwrap();
+            let tgt = graph.get_node(edge.target_id).unwrap();
+            let src_name = src.properties.get_string("name").unwrap_or("?");
+            let tgt_name = tgt.properties.get_string("name").unwrap_or("?");
+            println!("CALL: {} -> {}", src_name, tgt_name);
+            found_calls.push((src_name.to_string(), tgt_name.to_string()));
+        }
+    }
+
+    // Also check unresolved_calls
+    for (_, node) in graph.iter_nodes() {
+        if let Some(unresolved) = node.properties.get_string_list_compat("unresolved_calls") {
+            let name = node.properties.get_string("name").unwrap_or("?");
+            println!("UNRESOLVED for {}: {:?}", name, unresolved);
+        }
+    }
+
+    assert!(!found_calls.is_empty() || {
+        graph.iter_nodes().any(|(_, n)| {
+            n.properties.get_string_list_compat("unresolved_calls")
+                .map(|c| !c.is_empty())
+                .unwrap_or(false)
+        })
+    }, "Expected call edges or unresolved_calls for hw_init/hw_reset/printf");
+}

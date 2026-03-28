@@ -276,7 +276,7 @@ impl CPreprocessor {
 
     /// Initialize standard C macros
     fn init_standard_macros(&mut self) {
-        // Standard C types
+        // Standard C constants
         for (macro_name, expansion) in [
             ("NULL", "((void*)0)"),
             ("EOF", "(-1)"),
@@ -284,6 +284,22 @@ impl CPreprocessor {
             ("false", "0"),
             ("TRUE", "1"),
             ("FALSE", "0"),
+        ] {
+            self.type_macros
+                .insert(macro_name.to_string(), expansion.to_string());
+        }
+
+        // C99 stdint.h fixed-width types — tree-sitter doesn't process
+        // #include <stdint.h> so these must be injected as typedefs
+        for (macro_name, expansion) in [
+            ("uint8_t", "unsigned char"),
+            ("uint16_t", "unsigned short"),
+            ("uint32_t", "unsigned int"),
+            ("uint64_t", "unsigned long long"),
+            ("int8_t", "signed char"),
+            ("int16_t", "signed short"),
+            ("int32_t", "signed int"),
+            ("int64_t", "signed long long"),
         ] {
             self.type_macros
                 .insert(macro_name.to_string(), expansion.to_string());

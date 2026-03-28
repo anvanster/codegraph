@@ -64,7 +64,7 @@ pub fn extract(
     // ERROR nodes but produce wrong IR because tree-sitter doesn't know
     // the custom typedefs. Preprocess them immediately instead of waiting
     // for the tolerant fallback (which only triggers on SyntaxError).
-    let needs_preprocess = source_has_kernel_types(source);
+    let needs_preprocess = source_needs_type_preamble(source);
 
     let options = ExtractionOptions {
         extract_calls: true,
@@ -86,16 +86,27 @@ pub fn extract(
     Ok(result.ir)
 }
 
-/// Quick scan for VMK/ESX/kernel-style type names that tree-sitter won't
-/// recognise as type specifiers without preprocessing.
-fn source_has_kernel_types(source: &str) -> bool {
+/// Quick scan for type names that tree-sitter won't recognise as type
+/// specifiers without preprocessing (stdint, kernel, VMware types).
+fn source_needs_type_preamble(source: &str) -> bool {
     // Check the first ~4KB for common patterns (fast path for normal C files)
     let sample = if source.len() > 4096 {
         &source[..4096]
     } else {
         source
     };
-    sample.contains("vmk_")
+
+    // C99 stdint.h types — extremely common, tree-sitter doesn't know them
+    sample.contains("uint8_t")
+        || sample.contains("uint16_t")
+        || sample.contains("uint32_t")
+        || sample.contains("uint64_t")
+        || sample.contains("int8_t")
+        || sample.contains("int16_t")
+        || sample.contains("int32_t")
+        || sample.contains("int64_t")
+        // Linux kernel types
+        || sample.contains("vmk_")
         || sample.contains("VMK_")
         || sample.contains("vmk_Bool")
         || sample.contains("vmk_uint")
