@@ -1453,7 +1453,7 @@ impl<'a> TclVisitor<'a> {
             caller,
             callee: callee.to_string(),
             call_site_line: node.start_position().row + 1,
-            is_direct: true,
+            is_direct: true, struct_type: None, field_name: None,
         });
     }
 

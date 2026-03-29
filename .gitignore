@@ -33,3 +33,11 @@ coverage/
 # RocksDB test databases
 *.graph
 test_db/
+
+# Agent/tool config and state
+.claude/
+.mcp.json
+.overstory/
+.smelt/
+.stellarion/
+package-lock.json

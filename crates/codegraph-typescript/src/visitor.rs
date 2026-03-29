@@ -783,7 +783,7 @@ impl<'a> TypeScriptVisitor<'a> {
                 caller: caller.clone(),
                 callee,
                 call_site_line,
-                is_direct: true,
+                is_direct: true, struct_type: None, field_name: None,
             };
 
             self.calls.push(call);
@@ -820,7 +820,7 @@ impl<'a> TypeScriptVisitor<'a> {
                     caller: caller.clone(),
                     callee: class_name,
                     call_site_line: node.start_position().row + 1,
-                    is_direct: true,
+                    is_direct: true, struct_type: None, field_name: None,
                 });
             }
         }

@@ -696,7 +696,7 @@ impl<'a> PhpVisitor<'a> {
             caller,
             callee,
             call_site_line,
-            is_direct: true,
+            is_direct: true, struct_type: None, field_name: None,
         };
 
         self.calls.push(call);

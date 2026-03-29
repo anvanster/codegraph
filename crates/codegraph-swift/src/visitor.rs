@@ -468,7 +468,7 @@ impl<'a> SwiftVisitor<'a> {
             caller,
             callee,
             call_site_line: node.start_position().row + 1,
-            is_direct: true,
+            is_direct: true, struct_type: None, field_name: None,
         };
 
         self.calls.push(call);

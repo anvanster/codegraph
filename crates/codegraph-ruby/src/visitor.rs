@@ -387,7 +387,7 @@ impl<'a> RubyVisitor<'a> {
                     caller: caller.clone(),
                     callee,
                     call_site_line: node.start_position().row + 1,
-                    is_direct: true,
+                    is_direct: true, struct_type: None, field_name: None,
                 };
                 self.calls.push(call);
             }
@@ -461,7 +461,7 @@ impl<'a> RubyVisitor<'a> {
                                 caller: caller.clone(),
                                 callee,
                                 call_site_line: child.start_position().row + 1,
-                                is_direct: true,
+                                is_direct: true, struct_type: None, field_name: None,
                             };
                             self.calls.push(call);
                         }
