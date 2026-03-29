@@ -203,8 +203,13 @@ pub fn extract_with_options(
         .calls
         .into_iter()
         .filter_map(|call| {
-            call.caller
-                .map(|caller| CallRelation::new(caller, call.callee, call.line))
+            call.caller.map(|caller| {
+                let mut rel = CallRelation::new(caller, call.callee, call.line);
+                if let (Some(st), Some(fn_name)) = (call.struct_type, call.field_name) {
+                    rel = rel.with_vtable(st, fn_name);
+                }
+                rel
+            })
         })
         .collect();
 

@@ -21,6 +21,10 @@ pub struct FunctionCall {
     pub line: usize,
     /// Name of the calling function (if inside a function)
     pub caller: Option<String>,
+    /// For ops struct assignments: the struct type name (e.g., "net_device_ops")
+    pub struct_type: Option<String>,
+    /// For ops struct assignments: the field name (e.g., "ndo_open")
+    pub field_name: Option<String>,
 }
 
 pub struct CVisitor<'a> {
@@ -142,6 +146,8 @@ impl<'a> CVisitor<'a> {
                     callee,
                     line: node.start_position().row + 1,
                     caller: self.current_function.clone(),
+                    struct_type: None,
+                    field_name: None,
                 });
             }
         }
@@ -657,8 +663,11 @@ impl<'a> CVisitor<'a> {
             && value_name != "null"
             && !value_name.starts_with(|c: char| c.is_ascii_digit())
         {
-            // Use current_function as caller if inside a function, otherwise use
-            // the struct variable name (derived from the parent declaration)
+            // Walk up the tree to find the struct type from the parent declaration:
+            //   declaration → type_identifier (e.g., "net_device_ops")
+            //   or: declaration → struct_specifier → type_identifier
+            let struct_type = Self::find_parent_struct_type(node, self.source);
+
             let caller = self
                 .current_function
                 .clone()
@@ -668,8 +677,60 @@ impl<'a> CVisitor<'a> {
                 callee: value_name,
                 line: node.start_position().row + 1,
                 caller: Some(caller),
+                struct_type,
+                field_name: if field_name.is_empty() {
+                    None
+                } else {
+                    Some(field_name)
+                },
             });
         }
+    }
+
+    /// Walk up the AST from an initializer_pair to find the struct type name
+    /// from the enclosing declaration.
+    ///
+    /// Handles patterns like:
+    /// - `static const struct net_device_ops ops = { .field = fn };`
+    /// - `DeviceOps ops = { .field = fn };`
+    /// - `static struct fuse_operations vmblockOps = { .field = fn };`
+    fn find_parent_struct_type(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+        let mut current = node;
+        // Walk up at most 5 levels to find the declaration
+        for _ in 0..5 {
+            current = current.parent()?;
+            if current.kind() == "declaration" {
+                // Look for type identifier or struct specifier in the declaration
+                let mut cursor = current.walk();
+                for child in current.children(&mut cursor) {
+                    match child.kind() {
+                        // Direct type name: `DeviceOps ops = { ... };`
+                        "type_identifier" => {
+                            let text = child.utf8_text(source).unwrap_or("").to_string();
+                            if !text.is_empty() {
+                                return Some(text);
+                            }
+                        }
+                        // Struct specifier: `struct net_device_ops ops = { ... };`
+                        "struct_specifier" => {
+                            let mut inner = child.walk();
+                            for sc in child.children(&mut inner) {
+                                if sc.kind() == "type_identifier" {
+                                    let text =
+                                        sc.utf8_text(source).unwrap_or("").to_string();
+                                    if !text.is_empty() {
+                                        return Some(text);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                return None;
+            }
+        }
+        None
     }
 
     fn calculate_complexity(&self, body: Node) -> ComplexityMetrics {

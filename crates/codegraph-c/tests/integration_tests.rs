@@ -1788,3 +1788,66 @@ int process(my_uint32 count) {
     // Cleanup
     let _ = std::fs::remove_file(header_path);
 }
+
+#[test]
+fn test_ops_struct_type_tracking() {
+    use codegraph::CodeGraph;
+    use codegraph_c::CParser;
+    use std::path::Path;
+
+    let source = r#"
+static int my_open(void *ctx) { return 0; }
+static int my_close(void *ctx) { return 0; }
+static int my_read(void *ctx, char *buf, int len) { return len; }
+
+struct device_ops {
+    int (*open)(void *);
+    int (*close)(void *);
+    int (*read)(void *, char *, int);
+};
+
+static const struct device_ops my_device_ops = {
+    .open = my_open,
+    .close = my_close,
+    .read = my_read,
+};
+"#;
+
+    let path = Path::new("/tmp/test_ops_struct.c");
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let _info = parser.parse_source(source, path, &mut graph).unwrap();
+
+    let mut vtable_edges = Vec::new();
+    for (_, edge) in graph.iter_edges() {
+        if edge.edge_type == codegraph::EdgeType::Calls {
+            let struct_type = edge.properties.get_string("struct_type").map(|s| s.to_string());
+            let field_name = edge.properties.get_string("field_name").map(|s| s.to_string());
+            if struct_type.is_some() || field_name.is_some() {
+                let tgt = graph.get_node(edge.target_id).unwrap();
+                let tgt_name = tgt.properties.get_string("name").unwrap_or("?");
+                println!(
+                    "VTABLE: {}.{} = {} (struct_type={:?}, field_name={:?})",
+                    struct_type.as_deref().unwrap_or("?"),
+                    field_name.as_deref().unwrap_or("?"),
+                    tgt_name,
+                    struct_type,
+                    field_name,
+                );
+                vtable_edges.push((
+                    struct_type.unwrap_or_default(),
+                    field_name.unwrap_or_default(),
+                    tgt_name.to_string(),
+                ));
+            }
+        }
+    }
+
+    assert_eq!(vtable_edges.len(), 3, "Expected 3 vtable assignments, got {}", vtable_edges.len());
+    assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "open" && t == "my_open"),
+        "Missing device_ops.open = my_open");
+    assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "close" && t == "my_close"),
+        "Missing device_ops.close = my_close");
+    assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "read" && t == "my_read"),
+        "Missing device_ops.read = my_read");
+}

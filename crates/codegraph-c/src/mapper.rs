@@ -221,9 +221,17 @@ pub fn ir_to_graph(
 
         if let Some(&callee_id) = node_map.get(&call.callee) {
             // Both caller and callee are in this file - create direct edge
-            let edge_props = PropertyMap::new()
+            let mut edge_props = PropertyMap::new()
                 .with("call_site_line", call.call_site_line as i64)
                 .with("is_direct", call.is_direct);
+
+            // Add ops struct metadata if this is a vtable assignment
+            if let Some(ref st) = call.struct_type {
+                edge_props = edge_props.with("struct_type", st.clone());
+            }
+            if let Some(ref fn_name) = call.field_name {
+                edge_props = edge_props.with("field_name", fn_name.clone());
+            }
 
             graph
                 .add_edge(caller_id, callee_id, EdgeType::Calls, edge_props)

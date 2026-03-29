@@ -14,6 +14,12 @@ pub struct CallRelation {
 
     /// Is this a direct call or indirect (e.g., through function pointer)?
     pub is_direct: bool,
+
+    /// For ops struct / vtable assignments: the struct type name (e.g., "net_device_ops")
+    pub struct_type: Option<String>,
+
+    /// For ops struct / vtable assignments: the field name (e.g., "ndo_open")
+    pub field_name: Option<String>,
 }
 
 impl CallRelation {
@@ -23,10 +29,19 @@ impl CallRelation {
             callee: callee.into(),
             call_site_line: line,
             is_direct: true,
+            struct_type: None,
+            field_name: None,
         }
     }
 
     pub fn indirect(mut self) -> Self {
+        self.is_direct = false;
+        self
+    }
+
+    pub fn with_vtable(mut self, struct_type: String, field_name: String) -> Self {
+        self.struct_type = Some(struct_type);
+        self.field_name = Some(field_name);
         self.is_direct = false;
         self
     }
