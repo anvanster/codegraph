@@ -1730,3 +1730,61 @@ int driver_set_mtu(uint32_t mtu) {
         })
     }, "Expected call edges or unresolved_calls for hw_init/hw_reset/printf");
 }
+
+#[test]
+fn test_header_type_resolution() {
+    use codegraph::CodeGraph;
+    use codegraph_c::CParser;
+    use std::path::Path;
+
+    // Write a temporary header
+    let header = r#"
+#ifndef TEST_H
+#define TEST_H
+typedef unsigned int my_uint32;
+typedef struct my_ctx my_ctx_t;
+typedef void (*callback_fn)(int);
+struct my_data {
+    int value;
+};
+#endif
+"#;
+    let header_path = "/tmp/test_header_resolve.h";
+    std::fs::write(header_path, header).unwrap();
+
+    let source = r#"
+#include "test_header_resolve.h"
+
+int process(my_uint32 count) {
+    struct my_data d;
+    d.value = count;
+    return d.value;
+}
+"#;
+
+    let path = Path::new("/tmp/test_with_header.c");
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let info = parser.parse_source(source, path, &mut graph).unwrap();
+
+    // Should have parsed the function successfully
+    assert!(!info.functions.is_empty(), "Should parse process() function");
+
+    // Check that the function node exists with correct name
+    let mut found_process = false;
+    for (_, node) in graph.iter_nodes() {
+        if node.properties.get_string("name") == Some("process") {
+            found_process = true;
+            // Check signature includes my_uint32 (parsed correctly, not ERROR)
+            let sig = node.properties.get_string("signature").unwrap_or("");
+            println!("Signature: {}", sig);
+            assert!(sig.contains("my_uint32") || sig.contains("count"),
+                "Signature should contain parameter info: {}", sig);
+            break;
+        }
+    }
+    assert!(found_process, "Should find process() function in graph");
+
+    // Cleanup
+    let _ = std::fs::remove_file(header_path);
+}

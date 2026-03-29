@@ -20,6 +20,9 @@ pub struct ExtractionOptions {
     pub preprocess: bool,
     /// If true, extract function calls for call graph
     pub extract_calls: bool,
+    /// Additional type definitions from resolved headers (name, expansion).
+    /// These are injected into the preprocessor before parsing.
+    pub header_types: Vec<(String, String)>,
 }
 
 impl ExtractionOptions {
@@ -29,6 +32,7 @@ impl ExtractionOptions {
             tolerant_mode: true,
             preprocess: true,
             extract_calls: true,
+            header_types: Vec::new(),
         }
     }
 
@@ -38,6 +42,7 @@ impl ExtractionOptions {
             tolerant_mode: true,
             preprocess: false,
             extract_calls: true,
+            header_types: Vec::new(),
         }
     }
 }
@@ -88,7 +93,7 @@ pub fn extract(
 
 /// Quick scan for type names that tree-sitter won't recognise as type
 /// specifiers without preprocessing (stdint, kernel, VMware types).
-fn source_needs_type_preamble(source: &str) -> bool {
+pub fn source_needs_type_preamble(source: &str) -> bool {
     // Check the first ~4KB for common patterns (fast path for normal C files)
     let sample = if source.len() > 4096 {
         &source[..4096]
@@ -121,7 +126,13 @@ pub fn extract_with_options(
     options: &ExtractionOptions,
 ) -> Result<ExtractionResult, ParserError> {
     // Detect macros from original source (before preprocessing)
-    let preprocessor = CPreprocessor::new();
+    let mut preprocessor = CPreprocessor::new();
+
+    // Add header-resolved types before preprocessing
+    for (name, expansion) in &options.header_types {
+        preprocessor.add_type(name, expansion);
+    }
+
     let detected_macros: Vec<String> = preprocessor
         .analyze_macros(source)
         .iter()

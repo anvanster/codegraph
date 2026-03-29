@@ -26,6 +26,87 @@ impl CParser {
         }
     }
 
+    /// Parse C source with additional type definitions from resolved headers.
+    /// The server calls this instead of `parse_source` when header context is available.
+    pub fn parse_source_with_headers(
+        &self,
+        source: &str,
+        file_path: &Path,
+        graph: &mut CodeGraph,
+        header_types: Vec<(String, String)>,
+    ) -> Result<FileInfo, ParserError> {
+        let start = Instant::now();
+
+        let needs_preprocess = !header_types.is_empty()
+            || extractor::source_needs_type_preamble(source);
+
+        let options = extractor::ExtractionOptions {
+            extract_calls: true,
+            preprocess: needs_preprocess,
+            header_types,
+            ..Default::default()
+        };
+
+        let ir = match extractor::extract_with_options(source, file_path, &options) {
+            Ok(result) if result.is_partial => {
+                // Retry with tolerant mode, preserving header types
+                let tolerant = extractor::ExtractionOptions {
+                    tolerant_mode: true,
+                    preprocess: true,
+                    extract_calls: true,
+                    header_types: options.header_types,
+                };
+                extractor::extract_with_options(source, file_path, &tolerant)?.ir
+            }
+            Ok(result) => result.ir,
+            Err(e) => return Err(e),
+        };
+
+        let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
+        file_info.parse_time = start.elapsed();
+        file_info.line_count = source.lines().count();
+        file_info.byte_count = source.len();
+
+        Ok(file_info)
+    }
+
+    /// Scan a C source file for `#include "..."` directives and resolve them
+    /// relative to the file's directory. Returns extracted types from found headers.
+    pub fn resolve_local_includes(source: &str, file_path: &Path) -> Vec<(String, String)> {
+        let parent = match file_path.parent() {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+
+        let mut all_types = Vec::new();
+        let mut seen_headers = std::collections::HashSet::new();
+
+        for line in source.lines() {
+            let trimmed = line.trim();
+            // Match #include "local_header.h" (not <system_header.h>)
+            if let Some(rest) = trimmed.strip_prefix("#include") {
+                let rest = rest.trim();
+                if rest.starts_with('"') {
+                    if let Some(end) = rest[1..].find('"') {
+                        let header_name = &rest[1..1 + end];
+                        let header_path = parent.join(header_name);
+                        if header_path.exists() && seen_headers.insert(header_path.clone()) {
+                            if let Ok(header_source) = std::fs::read_to_string(&header_path) {
+                                let types =
+                                    crate::preprocessor::CPreprocessor::extract_header_types(
+                                        &header_source,
+                                    );
+                                all_types.extend(types);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        all_types
+    }
+
     pub fn with_config(config: ParserConfig) -> Self {
         Self {
             config,
@@ -109,26 +190,32 @@ impl CodeParser for CParser {
         file_path: &Path,
         graph: &mut CodeGraph,
     ) -> Result<FileInfo, ParserError> {
-        let start = Instant::now();
+        // Auto-resolve local #include "..." headers for type context
+        let header_types = Self::resolve_local_includes(source, file_path);
 
-        // Try strict mode first; on syntax errors, retry with tolerant mode
-        let ir = match extractor::extract(source, file_path, &self.config) {
-            Ok(ir) => ir,
-            Err(ParserError::SyntaxError(..)) => {
-                let options = extractor::ExtractionOptions::for_kernel_code();
-                let result = extractor::extract_with_options(source, file_path, &options)?;
-                result.ir
-            }
-            Err(e) => return Err(e),
-        };
+        if header_types.is_empty() {
+            // No local headers — use the original strict→tolerant flow
+            let start = Instant::now();
+            let ir = match extractor::extract(source, file_path, &self.config) {
+                Ok(ir) => ir,
+                Err(ParserError::SyntaxError(..)) => {
+                    let options = extractor::ExtractionOptions::for_kernel_code();
+                    let result =
+                        extractor::extract_with_options(source, file_path, &options)?;
+                    result.ir
+                }
+                Err(e) => return Err(e),
+            };
 
-        let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
-
-        file_info.parse_time = start.elapsed();
-        file_info.line_count = source.lines().count();
-        file_info.byte_count = source.len();
-
-        Ok(file_info)
+            let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
+            file_info.parse_time = start.elapsed();
+            file_info.line_count = source.lines().count();
+            file_info.byte_count = source.len();
+            Ok(file_info)
+        } else {
+            // Headers found — use the header-aware path
+            self.parse_source_with_headers(source, file_path, graph, header_types)
+        }
     }
 
     fn config(&self) -> &ParserConfig {

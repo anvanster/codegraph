@@ -427,6 +427,73 @@ impl CPreprocessor {
         }
     }
 
+    /// Add type definitions extracted from a header file.
+    /// Call this before `preprocess()` to make header types available.
+    pub fn add_type(&mut self, name: &str, expansion: &str) {
+        self.type_macros
+            .insert(name.to_string(), expansion.to_string());
+    }
+
+    /// Known C primitive types that are safe to use as typedef expansions.
+    const SAFE_PRIMITIVES: &'static [&'static str] = &[
+        "void", "char", "short", "int", "long", "float", "double",
+        "unsigned", "signed", "unsigned char", "unsigned short",
+        "unsigned int", "unsigned long", "unsigned long long",
+        "signed char", "signed short", "signed int", "signed long",
+        "signed long long", "long long", "long double", "_Bool",
+    ];
+
+    /// Scan a header file's source and extract safe type definitions.
+    ///
+    /// Only extracts typedefs that resolve to primitive C types or `struct`/`enum`
+    /// forward declarations. This avoids injecting types that reference other
+    /// unresolved types (which would cause more parse errors, not fewer).
+    pub fn extract_header_types(header_source: &str) -> Vec<(String, String)> {
+        let mut types = Vec::new();
+
+        for line in header_source.lines() {
+            let trimmed = line.trim();
+
+            // typedef <primitive> <name>;
+            // e.g., typedef unsigned int uint32_t;
+            // Skip function pointers, complex types, struct bodies
+            if let Some(rest) = trimmed.strip_prefix("typedef ") {
+                if let Some(semi_pos) = rest.rfind(';') {
+                    let decl = rest[..semi_pos].trim();
+                    // Skip function pointers and complex types
+                    if decl.contains("(*") || decl.contains('{') {
+                        continue;
+                    }
+                    if let Some(name) = decl.split_whitespace().next_back() {
+                        let name = name.trim_start_matches('*');
+                        if name.is_empty()
+                            || !name.starts_with(|c: char| c.is_alphabetic() || c == '_')
+                        {
+                            continue;
+                        }
+                        let expansion = decl[..decl.len() - name.len()].trim();
+                        if expansion.is_empty() {
+                            continue;
+                        }
+                        // Only accept typedefs that expand to known primitives
+                        // or "struct X" / "enum X" patterns
+                        let is_safe = Self::SAFE_PRIMITIVES
+                            .iter()
+                            .any(|p| expansion == *p || expansion.starts_with(&format!("{p} ")))
+                            || expansion.starts_with("struct ")
+                            || expansion.starts_with("enum ")
+                            || expansion.starts_with("union ");
+                        if is_safe {
+                            types.push((name.to_string(), expansion.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
+        types
+    }
+
     /// Preprocess source code to make it more parseable
     ///
     /// This performs lightweight transformations:
