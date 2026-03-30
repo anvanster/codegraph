@@ -566,20 +566,13 @@ impl CPreprocessor {
             return line.to_string();
         }
 
-        // Handle preprocessor directives
-        // Note: We keep #if/#ifdef/#else/#endif as-is because converting them to comments
-        // can break code structure (e.g., nested conditionals become orphaned code blocks).
-        // Tree-sitter's error tolerance handles these better when left intact.
-
-        // Strip #define macros that often cause parsing issues
-        // (function-like macros mid-declaration)
-        if trimmed.starts_with("#define ")
-            || trimmed.starts_with("#undef ")
-            || trimmed.starts_with("#pragma ")
-            || trimmed.starts_with("#error ")
-            || trimmed.starts_with("#warning ")
+        // Strip all preprocessor directives except #include (kept for import tracking).
+        // #if/#ifdef/#else/#endif inside struct initializers break tree-sitter parsing
+        // and prevent vtable/ops struct detection. Stripping to comments preserves line
+        // numbers while letting tree-sitter see both branches as valid C code.
+        if trimmed.starts_with('#')
+            && !trimmed.starts_with("#include")
         {
-            // Convert to empty comment to preserve line numbers
             return "/* preprocessor directive stripped */".to_string();
         }
 

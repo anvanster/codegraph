@@ -1851,3 +1851,52 @@ static const struct device_ops my_device_ops = {
     assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "read" && t == "my_read"),
         "Missing device_ops.read = my_read");
 }
+
+#[test]
+fn test_ethtool_ops_struct_detection() {
+    use codegraph::CodeGraph;
+    use codegraph_c::CParser;
+    use std::path::Path;
+
+    let source = r#"
+static int my_get_info(void *dev) { return 0; }
+static int my_get_stats(void *dev) { return 0; }
+static int my_set_config(void *dev) { return 0; }
+
+struct ethtool_ops {
+    int (*get_info)(void *);
+    int (*get_stats)(void *);
+    int (*set_config)(void *);
+};
+
+static const struct ethtool_ops my_ethtool_ops = {
+    .get_info = my_get_info,
+    .get_stats = my_get_stats,
+    .set_config = my_set_config,
+};
+"#;
+
+    let path = Path::new("/tmp/test_ethtool_ops.c");
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let _info = parser.parse_source(source, path, &mut graph).unwrap();
+
+    let mut vtable_edges = Vec::new();
+    for (_, edge) in graph.iter_edges() {
+        if edge.edge_type == codegraph::EdgeType::Calls {
+            let st = edge.properties.get_string("struct_type").map(|s| s.to_string());
+            let field = edge.properties.get_string("field_name").map(|s| s.to_string());
+            if st.is_some() {
+                let tgt = graph.get_node(edge.target_id).unwrap();
+                let tgt_name = tgt.properties.get_string("name").unwrap_or("?");
+                println!("OPS: {}.{} = {}", st.as_deref().unwrap_or("?"), field.as_deref().unwrap_or("?"), tgt_name);
+                vtable_edges.push((st.unwrap_or_default(), field.unwrap_or_default(), tgt_name.to_string()));
+            }
+        }
+    }
+
+    assert_eq!(vtable_edges.len(), 3, "Expected 3 ops struct assignments, got {}: {:?}", vtable_edges.len(), vtable_edges);
+    assert!(vtable_edges.iter().any(|(s, f, t)| s == "ethtool_ops" && f == "get_info" && t == "my_get_info"));
+    assert!(vtable_edges.iter().any(|(s, f, t)| s == "ethtool_ops" && f == "get_stats" && t == "my_get_stats"));
+    assert!(vtable_edges.iter().any(|(s, f, t)| s == "ethtool_ops" && f == "set_config" && t == "my_set_config"));
+}
