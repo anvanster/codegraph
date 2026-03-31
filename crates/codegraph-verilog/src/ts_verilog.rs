@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bridge to the tree-sitter-verilog grammar via extern C binding.
 //!
 //! Despite its name, tree-sitter-verilog v1.0 IS the SystemVerilog grammar

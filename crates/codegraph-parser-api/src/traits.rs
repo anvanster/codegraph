@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::{config::ParserConfig, errors::ParserError, metrics::ParserMetrics};
 use codegraph::{CodeGraph, NodeId};
 use serde::{Deserialize, Serialize};

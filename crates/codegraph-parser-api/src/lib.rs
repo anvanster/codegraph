@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! CodeGraph Parser API
 //!
 //! Shared trait and types for building CodeGraph language parsers.
@@ -56,6 +59,10 @@
 //!     }
 //! }
 //! ```
+//!
+//! **Author:** Andrey Vasilevsky \<anvanster@gmail.com\>
+//! **License:** Apache-2.0
+//! **Repository:** <https://github.com/anvanster/codegraph>
 
 pub mod complexity;
 pub mod config;

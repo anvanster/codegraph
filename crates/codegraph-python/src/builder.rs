@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 use codegraph::{helpers, CodeGraph, EdgeType, NodeId, NodeType, PropertyMap};
 use codegraph_parser_api::CodeIR;
 use std::collections::HashMap;

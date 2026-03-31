@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! # codegraph-verilog
 //!
 //! Verilog parser for CodeGraph - extracts code entities and relationships
@@ -27,6 +30,10 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! **Author:** Andrey Vasilevsky \<anvanster@gmail.com\>
+//! **License:** Apache-2.0
+//! **Repository:** <https://github.com/anvanster/codegraph>
 
 mod extractor;
 mod mapper;

@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Linux kernel platform module
 //!
 //! Provides platform-specific configurations for parsing Linux kernel code,

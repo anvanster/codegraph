@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Preprocessor conditional evaluation
 //!
 //! This module provides evaluation of preprocessor conditionals to strip dead code

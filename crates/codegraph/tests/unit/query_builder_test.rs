@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Unit tests for QueryBuilder
 //!
 //! These tests verify the fluent query interface for finding code patterns.

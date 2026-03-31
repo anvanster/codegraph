@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Unit tests for core graph operations (add_node, get_node, add_edge, etc.).
 
 use codegraph::{CodeGraph, Direction, EdgeType, NodeType, PropertyMap};

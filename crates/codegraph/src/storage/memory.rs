@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! In-memory storage backend for testing.
 //!
 //! **Note**: This backend is for testing only. Do not use in production.

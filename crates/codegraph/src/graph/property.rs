@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Property system for flexible node and edge metadata.
 //!
 //! Provides type-safe property storage with a builder pattern.

@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! RDF Triples format export for semantic web and SPARQL queries.
 //!
 //! Generates N-Triples format where each line is a triple: (subject, predicate, object).

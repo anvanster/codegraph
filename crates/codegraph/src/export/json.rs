@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! JSON format export for D3.js and web visualization tools.
 //!
 //! Generates JSON with "nodes" and "links" arrays compatible with D3.js force-directed layouts.
