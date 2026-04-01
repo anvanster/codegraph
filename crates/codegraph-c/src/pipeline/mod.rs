@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Layered processing pipeline for C source code
 //!
 //! This module provides a multi-stage processing pipeline that transforms C source code

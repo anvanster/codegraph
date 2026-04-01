@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! AST extraction for C# source code
 
 use codegraph_parser_api::{CodeIR, ModuleEntity, ParserConfig, ParserError};

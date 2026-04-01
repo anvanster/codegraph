@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Graph traversal and analysis algorithms.
 //!
 //! Provides BFS, DFS, cycle detection (Tarjan's SCC), and path finding algorithms

@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bindings to the vendored tree-sitter-cobol grammar.
 //!
 //! The grammar function is exported as `tree_sitter_COBOL` (uppercase) by the

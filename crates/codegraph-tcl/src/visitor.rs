@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! AST visitor for extracting Tcl entities
 //!
 //! The vendored tree-sitter-tcl grammar (ABI v15→v14 patch) produces ERROR nodes

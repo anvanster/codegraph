@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! AST visitor for extracting C entities
 //!
 //! This visitor traverses the tree-sitter AST and extracts:

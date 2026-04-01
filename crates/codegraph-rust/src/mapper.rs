@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Mapper for converting CodeIR to CodeGraph nodes and edges
 //!
 //! This module handles the conversion of the intermediate representation (IR)

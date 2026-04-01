@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Convenience helpers for common code entities and relationships.
 //!
 //! This module provides higher-level abstractions for working with code graphs,

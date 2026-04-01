@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Call graph example demonstrating function call tracking
 //!
 //! This example shows how to build a call graph to track which functions

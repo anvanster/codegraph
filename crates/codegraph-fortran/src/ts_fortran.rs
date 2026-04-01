@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bridge to the tree-sitter-fortran grammar via extern C binding.
 //!
 //! tree-sitter-fortran v0.5.1 uses the newer tree-sitter-language API which is

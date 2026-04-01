@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! CSV format export for data analysis in spreadsheets and pandas.
 //!
 //! Generates separate CSV files for nodes and edges with auto-detected columns.

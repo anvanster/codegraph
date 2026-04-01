@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 use codegraph::CodeGraph;
 use codegraph_fortran::{CodeParser, FortranParser};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};

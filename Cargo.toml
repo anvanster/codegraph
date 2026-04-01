@@ -26,7 +26,7 @@ members = [
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/anvanster/codegraph"
-authors = ["anvanster"]
+authors = ["Andrey Vasilevsky <anvanster@gmail.com>"]
 
 [workspace.dependencies]
 # Shared dependencies across all crates

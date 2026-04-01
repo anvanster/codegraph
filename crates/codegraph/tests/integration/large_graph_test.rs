@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Integration test for large graph handling (100K nodes, 500K edges).
 
 use codegraph::{CodeGraph, EdgeType, NodeType, PropertyMap};

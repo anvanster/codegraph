@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! RocksDB storage backend for production use.
 //!
 //! This backend provides crash-safe, persistent storage with write-ahead logging.

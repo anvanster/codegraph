@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Mapper for converting CodeIR + TclExtraData to CodeGraph nodes and edges
 
 use codegraph::{CodeGraph, EdgeType, NodeId, NodeType, PropertyMap};

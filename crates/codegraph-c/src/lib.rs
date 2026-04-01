@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! # codegraph-c
 //!
 //! C parser for CodeGraph - extracts code entities and relationships from C source files.
@@ -75,6 +78,10 @@
 //!     result.platform.platform_id,
 //!     result.platform.confidence * 100.0);
 //! ```
+//!
+//! **Author:** Andrey Vasilevsky \<anvanster@gmail.com\>
+//! **License:** Apache-2.0
+//! **Repository:** <https://github.com/anvanster/codegraph>
 
 pub mod extractor;
 mod mapper;

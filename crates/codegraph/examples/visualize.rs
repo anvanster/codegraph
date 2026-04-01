@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Visualization and export example demonstrating all export formats.
 //!
 //! This example shows how to export a code graph to various formats:

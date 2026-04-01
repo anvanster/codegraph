@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Kernel macro expansion and neutralization
 //!
 //! Handles common Linux kernel macros that cause parsing errors by either:

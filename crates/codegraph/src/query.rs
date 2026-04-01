@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Query builder for fluent graph queries.
 //!
 //! Provides a fluent interface for constructing and executing complex graph queries

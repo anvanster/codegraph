@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! AST visitor for extracting Fortran entities
 //!
 //! Handles Fortran program units: program, module, submodule, subroutine, function,

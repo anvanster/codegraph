@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! # codegraph-python
 //!
 //! Python parser plugin for CodeGraph - extracts code entities and relationships
@@ -37,6 +40,10 @@
 //! // This API is deprecated - use PythonParser with CodeParser trait instead
 //! let parser = Parser::new();
 //! ```
+//!
+//! **Author:** Andrey Vasilevsky \<anvanster@gmail.com\>
+//! **License:** Apache-2.0
+//! **Repository:** <https://github.com/anvanster/codegraph>
 
 // Keep old config and error for backward compatibility with deprecated API
 pub mod config;

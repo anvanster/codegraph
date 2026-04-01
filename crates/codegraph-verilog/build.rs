@@ -1,3 +1,6 @@
+// Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 fn main() {
     // tree-sitter-verilog v1.0 uses the newer tree-sitter-language API which is
     // incompatible with tree-sitter 0.22. We use the C symbol directly via extern "C".
