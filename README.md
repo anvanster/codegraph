@@ -4,26 +4,47 @@
 [![Documentation](https://docs.rs/codegraph/badge.svg)](https://docs.rs/codegraph)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-A fast, reliable, and flexible graph database optimized for storing and querying code relationships, with production-ready language parsers.
+A fast, reliable, and flexible graph database optimized for storing and querying code relationships, with production-ready language parsers for 16 languages.
+
+**Author:** Andrey Vasilevsky <anvanster@gmail.com>
 
 ## Mission
 
 The codegraph ecosystem provides:
 - **codegraph**: Fast graph database for storing code relationships
 - **codegraph-parser-api**: Unified parser interface and types
-- **Language parsers**: Production-ready parsers for Python, Rust, TypeScript, and Go
+- **16 language parsers**: Production-ready parsers for Python, Rust, TypeScript, Go, C, C++, C#, Java, Kotlin, PHP, Ruby, Swift, Tcl, Verilog, COBOL, and Fortran
 - A complete solution for building code analysis tools
 
 ## Workspace Crates
 
-| Crate | Version | Description | Status |
-|-------|---------|-------------|--------|
-| [`codegraph`](crates/codegraph) | 0.1.1 | Graph database core | ✅ Stable |
-| [`codegraph-parser-api`](crates/codegraph-parser-api) | 0.1.0 | Parser trait and types | ✅ Stable |
-| [`codegraph-python`](crates/codegraph-python) | 0.2.0 | Python parser | ✅ Stable |
-| [`codegraph-rust`](crates/codegraph-rust) | 0.1.0 | Rust parser | ✅ Stable |
-| [`codegraph-typescript`](crates/codegraph-typescript) | 0.1.0 | TypeScript/JavaScript parser | ✅ Stable |
-| [`codegraph-go`](crates/codegraph-go) | 0.1.0 | Go parser | ✅ Stable |
+### Core
+
+| Crate | Version | Description |
+|-------|---------|-------------|
+| [`codegraph`](crates/codegraph) | 0.2.0 | Graph database core |
+| [`codegraph-parser-api`](crates/codegraph-parser-api) | 0.2.1 | Unified parser trait and types |
+
+### Language Parsers
+
+| Crate | Version | Description |
+|-------|---------|-------------|
+| [`codegraph-python`](crates/codegraph-python) | 0.4.3 | Python parser |
+| [`codegraph-typescript`](crates/codegraph-typescript) | 0.4.2 | TypeScript/JavaScript parser |
+| [`codegraph-rust`](crates/codegraph-rust) | 0.2.1 | Rust parser |
+| [`codegraph-cpp`](crates/codegraph-cpp) | 0.2.2 | C++ parser |
+| [`codegraph-php`](crates/codegraph-php) | 0.2.1 | PHP parser |
+| [`codegraph-ruby`](crates/codegraph-ruby) | 0.2.1 | Ruby parser |
+| [`codegraph-go`](crates/codegraph-go) | 0.1.6 | Go parser |
+| [`codegraph-c`](crates/codegraph-c) | 0.1.4 | C parser (with kernel/EDA support) |
+| [`codegraph-java`](crates/codegraph-java) | 0.1.2 | Java parser |
+| [`codegraph-kotlin`](crates/codegraph-kotlin) | 0.1.2 | Kotlin parser |
+| [`codegraph-csharp`](crates/codegraph-csharp) | 0.1.2 | C# parser |
+| [`codegraph-swift`](crates/codegraph-swift) | 0.1.2 | Swift parser |
+| [`codegraph-tcl`](crates/codegraph-tcl) | 0.1.1 | Tcl/SDC/UPF parser (with EDA support) |
+| [`codegraph-verilog`](crates/codegraph-verilog) | 0.1.0 | SystemVerilog/Verilog parser |
+| [`codegraph-cobol`](crates/codegraph-cobol) | 0.1.0 | COBOL parser |
+| [`codegraph-fortran`](crates/codegraph-fortran) | 0.1.0 | Fortran parser |
 
 ## Quick Start
 
@@ -31,9 +52,9 @@ The codegraph ecosystem provides:
 
 ```toml
 [dependencies]
-codegraph = "0.1.1"
-codegraph-parser-api = "0.1.0"
-codegraph-python = "0.2.0"  # or rust, typescript, go
+codegraph = "0.2.0"
+codegraph-parser-api = "0.2.1"
+codegraph-python = "0.4.3"  # or any other language parser
 ```
 
 ```rust
@@ -139,18 +160,175 @@ let info = parser.parse_directory(Path::new("./pkg"), &mut graph)?;
 ```
 </details>
 
+<details>
+<summary><b>C Parser (with kernel/EDA support)</b></summary>
+
+```rust
+use codegraph_c::CParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = CParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+// Parse C source (supports .c, .h files)
+let info = parser.parse_file(Path::new("main.c"), &mut graph)?;
+
+// Extracts: functions, structs, unions, enums, typedefs
+// Includes tolerant parsing mode and macro preprocessing for kernel code
+```
+</details>
+
+<details>
+<summary><b>C++ Parser</b></summary>
+
+```rust
+use codegraph_cpp::CppParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = CppParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+let info = parser.parse_file(Path::new("main.cpp"), &mut graph)?;
+
+// Extracts: classes, structs, functions, namespaces, templates
+```
+</details>
+
+<details>
+<summary><b>Java Parser</b></summary>
+
+```rust
+use codegraph_java::JavaParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = JavaParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+let info = parser.parse_file(Path::new("Main.java"), &mut graph)?;
+
+// Extracts: classes, interfaces, enums, methods, imports, inheritance
+```
+</details>
+
+<details>
+<summary><b>Kotlin Parser</b></summary>
+
+```rust
+use codegraph_kotlin::KotlinParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = KotlinParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+// Supports .kt, .kts files
+let info = parser.parse_file(Path::new("Main.kt"), &mut graph)?;
+
+// Extracts: classes, interfaces, objects, data classes, functions
+```
+</details>
+
+<details>
+<summary><b>C# Parser</b></summary>
+
+```rust
+use codegraph_csharp::CSharpParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = CSharpParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+let info = parser.parse_file(Path::new("Program.cs"), &mut graph)?;
+
+// Extracts: classes, interfaces, structs, enums, methods
+```
+</details>
+
+<details>
+<summary><b>PHP Parser</b></summary>
+
+```rust
+use codegraph_php::PhpParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = PhpParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+let info = parser.parse_file(Path::new("index.php"), &mut graph)?;
+
+// Extracts: classes, interfaces, traits, enums, functions
+```
+</details>
+
+<details>
+<summary><b>Ruby Parser</b></summary>
+
+```rust
+use codegraph_ruby::RubyParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = RubyParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+let info = parser.parse_file(Path::new("app.rb"), &mut graph)?;
+
+// Extracts: classes, modules, methods, relationships
+```
+</details>
+
+<details>
+<summary><b>Swift Parser</b></summary>
+
+```rust
+use codegraph_swift::SwiftParser;
+use codegraph_parser_api::CodeParser;
+
+let parser = SwiftParser::new();
+let mut graph = CodeGraph::open("project.graph")?;
+
+let info = parser.parse_file(Path::new("ViewController.swift"), &mut graph)?;
+
+// Extracts: classes, structs, protocols, enums, functions
+```
+</details>
+
+<details>
+<summary><b>EDA/HDL Parsers (Tcl, Verilog, COBOL, Fortran)</b></summary>
+
+```rust
+// Tcl/SDC/UPF (EDA flows)
+use codegraph_tcl::TclParser;
+let parser = TclParser::new();
+// Supports .tcl, .sdc, .upf - extracts procedures, namespaces, EDA commands
+
+// SystemVerilog/Verilog
+use codegraph_verilog::VerilogParser;
+let parser = VerilogParser::new();
+// Supports .v, .vh - extracts modules, functions, tasks, instantiations
+
+// COBOL
+use codegraph_cobol::CobolParser;
+let parser = CobolParser::new();
+// Supports .cob, .cbl, .cobol, .cpy - extracts programs, paragraphs, sections
+
+// Fortran
+use codegraph_fortran::FortranParser;
+let parser = FortranParser::new();
+// Supports .f, .f90, .f95, .f03, .f08 - extracts modules, subroutines, functions
+```
+</details>
+
 ## Core Principles
 
-### 🔌 Unified Parser API
+### Unified Parser API
 **"One trait to parse them all."**
 
-All language parsers implement the same `CodeParser` trait, providing:
+All 16 language parsers implement the same `CodeParser` trait, providing:
 - Consistent API across languages
 - Standardized entity types (functions, classes, imports)
 - Uniform error handling and metrics
 - Drop-in interchangeability
 
-### ⚡ Performance First
+### Performance First
 **"Sub-100ms queries or it didn't happen."**
 
 - Single node lookup: <1ms
@@ -158,19 +336,33 @@ All language parsers implement the same `CodeParser` trait, providing:
 - Graph traversal (depth=5): <50ms
 - 100K node graphs are practical
 
-### 🧪 Test-Driven Development
+### Test-Driven Development
 **"If it's not tested, it's broken."**
 
-- 421+ tests across entire workspace
-- codegraph: 39 tests (85% coverage)
-- parser-api: 12 tests with comprehensive entity validation
-- Python: 111 tests (~90% coverage)
-- Rust: 64 tests (40 unit + 24 integration)
-- TypeScript: 63 tests (40 unit + 23 integration)
-- Go: 54 tests (34 unit + 20 integration)
-- Every public API tested with TDD methodology
+1,300+ tests across the workspace:
 
-### 🪄 Zero Magic
+| Crate | Tests |
+|-------|-------|
+| codegraph-c | 160 |
+| codegraph (core) | 124 |
+| codegraph-python | 121 |
+| codegraph-typescript | 103 |
+| codegraph-rust | 97 |
+| codegraph-php | 86 |
+| codegraph-go | 73 |
+| codegraph-csharp | 64 |
+| codegraph-java | 62 |
+| codegraph-kotlin | 60 |
+| codegraph-tcl | 58 |
+| codegraph-ruby | 51 |
+| codegraph-verilog | 51 |
+| codegraph-cobol | 47 |
+| codegraph-fortran | 47 |
+| codegraph-cpp | 40 |
+| codegraph-parser-api | 23 |
+| codegraph-swift | 41 |
+
+### Zero Magic
 **"Explicit over implicit, always."**
 
 - No global state
@@ -179,7 +371,7 @@ All language parsers implement the same `CodeParser` trait, providing:
 - Explicit error handling (no panics in library code)
 - No unsafe code
 
-### 💾 Persistence is Primary
+### Persistence is Primary
 **"Graphs outlive processes."**
 
 - RocksDB backend for production
@@ -193,7 +385,7 @@ If you want to use your own parsers:
 
 ```toml
 [dependencies]
-codegraph = "0.1.1"
+codegraph = "0.2.0"
 ```
 
 ```rust
@@ -220,13 +412,13 @@ codegraph is organized in clear layers:
 
 ```
 User Tools (parsers, analysis)
-    ↓
+    |
 Code Helpers (convenience API)
-    ↓
+    |
 Query Builder (fluent interface)
-    ↓
+    |
 Core Graph (nodes, edges, algorithms)
-    ↓
+    |
 Storage Backend (RocksDB, memory)
 ```
 
@@ -239,22 +431,23 @@ Each layer:
 ## Features
 
 - **Persistent Storage**: Production-ready RocksDB backend
+- **16 Language Parsers**: Comprehensive coverage from Python to COBOL
 - **Type-Safe API**: Rust's type system prevents common errors
 - **Schema-less Properties**: Flexible JSON properties on nodes and edges
 - **Efficient Queries**: O(1) neighbor lookups with adjacency indexing
 - **Explicit Operations**: No hidden behavior or magical conventions
-- **Comprehensive Tests**: 85% test coverage (983/1158 lines)
+- **1,300+ Tests**: Comprehensive test coverage across all crates
 - **Zero Unsafe Code**: Memory-safe by default
 
 ## What We Provide
 
-### ✅ Complete Solution
+### Complete Solution
 - **Graph Database**: Fast, persistent storage for code relationships
 - **Parser API**: Unified interface for all language parsers
-- **Language Parsers**: Production-ready Python, Rust, TypeScript, and Go parsers
+- **16 Language Parsers**: Python, Rust, TypeScript, Go, C, C++, C#, Java, Kotlin, PHP, Ruby, Swift, Tcl, Verilog, COBOL, Fortran
 - **Analysis Foundation**: Building blocks for custom code analysis tools
 
-### ❌ Out of Scope
+### Out of Scope
 - **Semantic Analysis**: No type inference or advanced static analysis
 - **IDE Integration**: No LSP server or editor plugins
 - **Build System**: No compilation or dependency resolution
@@ -264,11 +457,11 @@ Each layer:
 
 | Operation | Target | Actual |
 |-----------|--------|--------|
-| Node lookup | <1ms | ✅ ~7ns (1000x better!) |
-| Neighbor query | <10ms | ✅ ~410ns - 40µs |
-| BFS traversal (depth=5) | <50ms | ✅ ~5ms |
-| Batch insert (10K nodes) | <500ms | ✅ ~7ms |
-| 100K node + 500K edge load | <5s | ✅ ~3.3s |
+| Node lookup | <1ms | ~7ns (1000x better!) |
+| Neighbor query | <10ms | ~410ns - 40us |
+| BFS traversal (depth=5) | <50ms | ~5ms |
+| Batch insert (10K nodes) | <500ms | ~7ms |
+| 100K node + 500K edge load | <5s | ~3.3s |
 
 ## Development
 
@@ -278,12 +471,13 @@ Each layer:
 # Build all crates
 cargo build --workspace --release
 
-# Test all crates (421+ tests)
+# Test all crates (1,300+ tests)
 cargo test --workspace
 
 # Test specific parser
 cargo test -p codegraph-python
 cargo test -p codegraph-rust
+cargo test -p codegraph-c
 
 # Generate documentation for all crates
 cargo doc --workspace --open
@@ -419,24 +613,11 @@ Before contributing, please:
 
 ## License
 
-codegraph is licensed under the **Apache License 2.0**, which means:
+codegraph is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) for the full text.
 
-✅ **You can:**
-- Use in commercial products
-- Modify and distribute
-- Use in proprietary software
-
-✅ **You must:**
-- Include a copy of the license
-- Disclose significant changes (in a CHANGES file)
-- Include the patent grant notice
-
-✅ **You can't:**
-- Hold us liable
-- Claim we endorse your product
-
-**This is a truly open license.** There's no "gotcha" later where we switch 
-to GPL or a commercial model. Apache-2.0 is forever.
+- Use in commercial and proprietary products
+- Modify and distribute freely
+- Include a copy of the license and disclose significant changes
 
 ## Code of Conduct
 
@@ -449,8 +630,6 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **v0.x**: API may change between minor versions (with deprecation warnings)
 - **v1.0+**: Stability guaranteed, breaking changes only in major versions
 
-Current version: **0.1.1** (Initial release + formatting fixes)
-
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/anvanster/codegraph/issues)
@@ -458,28 +637,28 @@ Current version: **0.1.1** (Initial release + formatting fixes)
 
 ## Roadmap
 
-### v0.2.0 (Current Release)
-- [x] Unified parser API with standardized types
-- [x] Python parser with comprehensive test coverage
-- [x] Rust parser with full AST extraction
-- [x] TypeScript/JavaScript parser with JSX/TSX support
-- [x] Go parser with import tracking
-- [x] 421+ tests across all crates
+### Completed
+- Unified parser API with standardized types
+- 16 production-ready language parsers
+- 1,300+ tests across all crates
+- RocksDB persistent storage with crash recovery
+- Export to DOT, JSON, CSV, and RDF formats
+- C parser with kernel-mode tolerant parsing and macro preprocessing
+- Tcl parser with EDA/SDC/UPF command classification
 
-### v0.3-0.5 (Near-term)
+### Near-term
 - [ ] Query language improvements (graph patterns, filters)
 - [ ] More export formats (GraphML, Cypher, Neo4j)
 - [ ] Performance optimizations (batch operations, caching)
 - [ ] Parser enhancements (semantic relationships, type information)
 
-### v0.6-0.9 (Medium-term)
+### Medium-term
 - [ ] Incremental updates (watch mode, delta parsing)
 - [ ] Change tracking and diff analysis
 - [ ] Statistics and metrics API
 - [ ] CLI tool for parsing and querying
-- [ ] Additional language parsers (Java, C++, C#)
 
-### v1.0+ (Long-term)
+### Long-term
 - [ ] Schema validation and constraints
 - [ ] Full-text search integration
 - [ ] Compression options for large graphs
@@ -495,4 +674,4 @@ This project draws inspiration from:
 
 ---
 
-Built with ❤️ in Rust
+Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com> | Apache-2.0
