@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 # CI Checks - Run this before pushing to ensure CI passes
 #
 # Usage: ./scripts/ci-checks.sh [options]

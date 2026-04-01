@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 set -euo pipefail
 
 # CI Pre-commit Script for codegraph-python
