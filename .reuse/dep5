@@ -1,0 +1,53 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: codegraph
+Upstream-Contact: Andrey Vasilevsky <anvanster@gmail.com>
+Source: https://github.com/anvanster/codegraph
+
+# License and notice files are self-describing
+Files: LICENSE NOTICE
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# Documentation files
+Files: *.md docs/*.md .github/*.md .github/prompts/*.md crates/*/*.md crates/*/docs/*.md
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# Generated lock file
+Files: Cargo.lock
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# JSON configuration (no comment syntax)
+Files: *.json .vscode/*.json
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# Git configuration files
+Files: .gitignore .gitattributes crates/*/.gitignore
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# Generated coverage reports
+Files: cobertura.xml crates/*/cobertura.xml
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# CI workflow backups
+Files: .github/workflows/*.bak .github/workflows/*.backup
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# Test fixture files (authored by project, used as parser test inputs)
+Files: crates/*/tests/fixtures/*
+Copyright: 2024-2026 Andrey Vasilevsky <anvanster@gmail.com>
+License: Apache-2.0
+
+# Vendored tree-sitter generated parser sources (third-party)
+Files: crates/codegraph-cobol/tree-sitter-cobol-src/*
+Copyright: tree-sitter contributors
+License: MIT
+
+Files: crates/codegraph-tcl/tree-sitter-tcl-src/*
+Copyright: tree-sitter contributors
+License: MIT
