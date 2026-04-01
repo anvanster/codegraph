@@ -1725,13 +1725,17 @@ int driver_set_mtu(uint32_t mtu) {
         }
     }
 
-    assert!(!found_calls.is_empty() || {
-        graph.iter_nodes().any(|(_, n)| {
-            n.properties.get_string_list_compat("unresolved_calls")
-                .map(|c| !c.is_empty())
-                .unwrap_or(false)
-        })
-    }, "Expected call edges or unresolved_calls for hw_init/hw_reset/printf");
+    assert!(
+        !found_calls.is_empty() || {
+            graph.iter_nodes().any(|(_, n)| {
+                n.properties
+                    .get_string_list_compat("unresolved_calls")
+                    .map(|c| !c.is_empty())
+                    .unwrap_or(false)
+            })
+        },
+        "Expected call edges or unresolved_calls for hw_init/hw_reset/printf"
+    );
 }
 
 #[test]
@@ -1771,7 +1775,10 @@ int process(my_uint32 count) {
     let info = parser.parse_source(source, path, &mut graph).unwrap();
 
     // Should have parsed the function successfully
-    assert!(!info.functions.is_empty(), "Should parse process() function");
+    assert!(
+        !info.functions.is_empty(),
+        "Should parse process() function"
+    );
 
     // Check that the function node exists with correct name
     let mut found_process = false;
@@ -1781,8 +1788,11 @@ int process(my_uint32 count) {
             // Check signature includes my_uint32 (parsed correctly, not ERROR)
             let sig = node.properties.get_string("signature").unwrap_or("");
             println!("Signature: {}", sig);
-            assert!(sig.contains("my_uint32") || sig.contains("count"),
-                "Signature should contain parameter info: {}", sig);
+            assert!(
+                sig.contains("my_uint32") || sig.contains("count"),
+                "Signature should contain parameter info: {}",
+                sig
+            );
             break;
         }
     }
@@ -1824,8 +1834,14 @@ static const struct device_ops my_device_ops = {
     let mut vtable_edges = Vec::new();
     for (_, edge) in graph.iter_edges() {
         if edge.edge_type == codegraph::EdgeType::Calls {
-            let struct_type = edge.properties.get_string("struct_type").map(|s| s.to_string());
-            let field_name = edge.properties.get_string("field_name").map(|s| s.to_string());
+            let struct_type = edge
+                .properties
+                .get_string("struct_type")
+                .map(|s| s.to_string());
+            let field_name = edge
+                .properties
+                .get_string("field_name")
+                .map(|s| s.to_string());
             if struct_type.is_some() || field_name.is_some() {
                 let tgt = graph.get_node(edge.target_id).unwrap();
                 let tgt_name = tgt.properties.get_string("name").unwrap_or("?");
@@ -1846,13 +1862,30 @@ static const struct device_ops my_device_ops = {
         }
     }
 
-    assert_eq!(vtable_edges.len(), 3, "Expected 3 vtable assignments, got {}", vtable_edges.len());
-    assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "open" && t == "my_open"),
-        "Missing device_ops.open = my_open");
-    assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "close" && t == "my_close"),
-        "Missing device_ops.close = my_close");
-    assert!(vtable_edges.iter().any(|(st, f, t)| st == "device_ops" && f == "read" && t == "my_read"),
-        "Missing device_ops.read = my_read");
+    assert_eq!(
+        vtable_edges.len(),
+        3,
+        "Expected 3 vtable assignments, got {}",
+        vtable_edges.len()
+    );
+    assert!(
+        vtable_edges
+            .iter()
+            .any(|(st, f, t)| st == "device_ops" && f == "open" && t == "my_open"),
+        "Missing device_ops.open = my_open"
+    );
+    assert!(
+        vtable_edges
+            .iter()
+            .any(|(st, f, t)| st == "device_ops" && f == "close" && t == "my_close"),
+        "Missing device_ops.close = my_close"
+    );
+    assert!(
+        vtable_edges
+            .iter()
+            .any(|(st, f, t)| st == "device_ops" && f == "read" && t == "my_read"),
+        "Missing device_ops.read = my_read"
+    );
 }
 
 #[test]
@@ -1887,19 +1920,98 @@ static const struct ethtool_ops my_ethtool_ops = {
     let mut vtable_edges = Vec::new();
     for (_, edge) in graph.iter_edges() {
         if edge.edge_type == codegraph::EdgeType::Calls {
-            let st = edge.properties.get_string("struct_type").map(|s| s.to_string());
-            let field = edge.properties.get_string("field_name").map(|s| s.to_string());
+            let st = edge
+                .properties
+                .get_string("struct_type")
+                .map(|s| s.to_string());
+            let field = edge
+                .properties
+                .get_string("field_name")
+                .map(|s| s.to_string());
             if st.is_some() {
                 let tgt = graph.get_node(edge.target_id).unwrap();
                 let tgt_name = tgt.properties.get_string("name").unwrap_or("?");
-                println!("OPS: {}.{} = {}", st.as_deref().unwrap_or("?"), field.as_deref().unwrap_or("?"), tgt_name);
-                vtable_edges.push((st.unwrap_or_default(), field.unwrap_or_default(), tgt_name.to_string()));
+                println!(
+                    "OPS: {}.{} = {}",
+                    st.as_deref().unwrap_or("?"),
+                    field.as_deref().unwrap_or("?"),
+                    tgt_name
+                );
+                vtable_edges.push((
+                    st.unwrap_or_default(),
+                    field.unwrap_or_default(),
+                    tgt_name.to_string(),
+                ));
             }
         }
     }
 
-    assert_eq!(vtable_edges.len(), 3, "Expected 3 ops struct assignments, got {}: {:?}", vtable_edges.len(), vtable_edges);
-    assert!(vtable_edges.iter().any(|(s, f, t)| s == "ethtool_ops" && f == "get_info" && t == "my_get_info"));
-    assert!(vtable_edges.iter().any(|(s, f, t)| s == "ethtool_ops" && f == "get_stats" && t == "my_get_stats"));
-    assert!(vtable_edges.iter().any(|(s, f, t)| s == "ethtool_ops" && f == "set_config" && t == "my_set_config"));
+    assert_eq!(
+        vtable_edges.len(),
+        3,
+        "Expected 3 ops struct assignments, got {}: {:?}",
+        vtable_edges.len(),
+        vtable_edges
+    );
+    assert!(vtable_edges
+        .iter()
+        .any(|(s, f, t)| s == "ethtool_ops" && f == "get_info" && t == "my_get_info"));
+    assert!(vtable_edges
+        .iter()
+        .any(|(s, f, t)| s == "ethtool_ops" && f == "get_stats" && t == "my_get_stats"));
+    assert!(vtable_edges
+        .iter()
+        .any(|(s, f, t)| s == "ethtool_ops" && f == "set_config" && t == "my_set_config"));
+}
+
+#[test]
+fn test_kernel_macro_detection() {
+    use codegraph::CodeGraph;
+    use codegraph_c::CParser;
+    use std::path::Path;
+
+    let source = r#"
+static int my_init(void) { return 0; }
+static void my_exit(void) { }
+int my_public_func(int x) { return x + 1; }
+int my_internal_func(int x) { return x - 1; }
+
+module_init(my_init);
+module_exit(my_exit);
+EXPORT_SYMBOL(my_public_func);
+EXPORT_SYMBOL_GPL(my_internal_func);
+"#;
+
+    let path = Path::new("/tmp/test_kernel_macros.c");
+    let mut graph = CodeGraph::in_memory().unwrap();
+    let parser = CParser::new();
+    let _info = parser.parse_source(source, path, &mut graph).unwrap();
+
+    // Check entry points
+    let mut found_init = false;
+    let mut found_exit = false;
+    let mut found_exported = 0;
+
+    for (_, node) in graph.iter_nodes() {
+        let name = node.properties.get_string("name").unwrap_or("");
+        let is_entry = node.properties.get_bool("is_entry_point").unwrap_or(false);
+        let is_exported = node.properties.get_bool("is_exported").unwrap_or(false);
+
+        if name == "my_init" && is_entry {
+            found_init = true;
+            println!("ENTRY: {} (entry_type={:?})", name,
+                node.properties.get_string("entry_type"));
+        }
+        if name == "my_exit" && is_entry {
+            found_exit = true;
+        }
+        if is_exported {
+            found_exported += 1;
+            println!("EXPORTED: {}", name);
+        }
+    }
+
+    assert!(found_init, "my_init should be marked as entry point");
+    assert!(found_exit, "my_exit should be marked as entry point");
+    assert_eq!(found_exported, 2, "Expected 2 exported symbols");
 }

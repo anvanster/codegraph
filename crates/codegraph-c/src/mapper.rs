@@ -303,6 +303,56 @@ pub fn ir_to_graph(
     })
 }
 
+/// Apply kernel macro metadata to function nodes.
+/// Sets `is_entry_point` on module_init/exit targets and
+/// `is_exported` on EXPORT_SYMBOL targets.
+pub fn apply_kernel_macros(
+    graph: &mut CodeGraph,
+    entry_points: &[String],
+    exported_symbols: &[String],
+) {
+    if entry_points.is_empty() && exported_symbols.is_empty() {
+        return;
+    }
+
+    // Build name → NodeId map for functions
+    let func_map: HashMap<String, NodeId> = graph
+        .iter_nodes()
+        .filter(|(_, n)| n.node_type == NodeType::Function)
+        .filter_map(|(id, n)| {
+            n.properties
+                .get_string("name")
+                .map(|name| (name.to_string(), id))
+        })
+        .collect();
+
+    for name in entry_points {
+        if let Some(&node_id) = func_map.get(name) {
+            if let Ok(node) = graph.get_node(node_id) {
+                let props = node
+                    .properties
+                    .clone()
+                    .with("is_entry_point", true)
+                    .with("entry_type", "module_init");
+                let _ = graph.update_node_properties(node_id, props);
+            }
+        }
+    }
+
+    for name in exported_symbols {
+        if let Some(&node_id) = func_map.get(name) {
+            if let Ok(node) = graph.get_node(node_id) {
+                let props = node
+                    .properties
+                    .clone()
+                    .with("is_exported", true)
+                    .with("visibility", "public");
+                let _ = graph.update_node_properties(node_id, props);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

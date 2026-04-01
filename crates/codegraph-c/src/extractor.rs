@@ -54,6 +54,10 @@ impl ExtractionOptions {
 #[derive(Debug)]
 pub struct ExtractionResult {
     pub ir: CodeIR,
+    /// Functions registered via module_init/module_exit (entry points)
+    pub entry_points: Vec<String>,
+    /// Functions registered via EXPORT_SYMBOL (public API)
+    pub exported_symbols: Vec<String>,
     /// Number of syntax errors encountered (0 = clean parse)
     pub error_count: usize,
     /// Whether the file was fully parsed or partially
@@ -216,8 +220,13 @@ pub fn extract_with_options(
         })
         .collect();
 
+    let entry_points = visitor.entry_points;
+    let exported_symbols = visitor.exported_symbols;
+
     Ok(ExtractionResult {
         ir,
+        entry_points,
+        exported_symbols,
         error_count,
         is_partial: has_error,
         detected_macros,

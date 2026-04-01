@@ -37,6 +37,10 @@ pub struct CVisitor<'a> {
     pub imports: Vec<ImportRelation>,
     /// Function calls extracted from the source
     pub calls: Vec<FunctionCall>,
+    /// Functions registered via module_init/module_exit (entry points)
+    pub entry_points: Vec<String>,
+    /// Functions registered via EXPORT_SYMBOL/EXPORT_SYMBOL_GPL (public API)
+    pub exported_symbols: Vec<String>,
     /// Whether to extract function calls
     extract_calls: bool,
     /// Current function being visited (for tracking caller)
@@ -51,6 +55,8 @@ impl<'a> CVisitor<'a> {
             structs: Vec::new(),
             imports: Vec::new(),
             calls: Vec::new(),
+            entry_points: Vec::new(),
+            exported_symbols: Vec::new(),
             extract_calls: false,
             current_function: None,
         }
@@ -145,6 +151,38 @@ impl<'a> CVisitor<'a> {
             };
 
             if !callee.is_empty() {
+                // Detect kernel registration macros at top level
+                if self.current_function.is_none() {
+                    match callee.as_str() {
+                        "module_init" | "module_exit" | "late_initcall"
+                        | "subsys_initcall" | "device_initcall" => {
+                            // Extract the argument (the registered function name)
+                            if let Some(args) = node.child_by_field_name("arguments") {
+                                if let Some(arg) = args.named_child(0) {
+                                    let func_name = self.node_text(arg);
+                                    if !func_name.is_empty() {
+                                        self.entry_points.push(func_name);
+                                    }
+                                }
+                            }
+                            return;
+                        }
+                        "EXPORT_SYMBOL" | "EXPORT_SYMBOL_GPL"
+                        | "EXPORT_SYMBOL_NS" | "EXPORT_SYMBOL_NS_GPL" => {
+                            if let Some(args) = node.child_by_field_name("arguments") {
+                                if let Some(arg) = args.named_child(0) {
+                                    let func_name = self.node_text(arg);
+                                    if !func_name.is_empty() {
+                                        self.exported_symbols.push(func_name);
+                                    }
+                                }
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+
                 self.calls.push(FunctionCall {
                     callee,
                     line: node.start_position().row + 1,
@@ -719,8 +757,7 @@ impl<'a> CVisitor<'a> {
                             let mut inner = child.walk();
                             for sc in child.children(&mut inner) {
                                 if sc.kind() == "type_identifier" {
-                                    let text =
-                                        sc.utf8_text(source).unwrap_or("").to_string();
+                                    let text = sc.utf8_text(source).unwrap_or("").to_string();
                                     if !text.is_empty() {
                                         return Some(text);
                                     }

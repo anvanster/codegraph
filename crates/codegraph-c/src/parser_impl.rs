@@ -40,8 +40,8 @@ impl CParser {
     ) -> Result<FileInfo, ParserError> {
         let start = Instant::now();
 
-        let needs_preprocess = !header_types.is_empty()
-            || extractor::source_needs_type_preamble(source);
+        let needs_preprocess =
+            !header_types.is_empty() || extractor::source_needs_type_preamble(source);
 
         let options = extractor::ExtractionOptions {
             extract_calls: true,
@@ -89,9 +89,9 @@ impl CParser {
             // Match #include "local_header.h" (not <system_header.h>)
             if let Some(rest) = trimmed.strip_prefix("#include") {
                 let rest = rest.trim();
-                if rest.starts_with('"') {
-                    if let Some(end) = rest[1..].find('"') {
-                        let header_name = &rest[1..1 + end];
+                if let Some(stripped) = rest.strip_prefix('"') {
+                    if let Some(end) = stripped.find('"') {
+                        let header_name = &stripped[..end];
                         let header_path = parent.join(header_name);
                         if header_path.exists() && seen_headers.insert(header_path.clone()) {
                             if let Ok(header_source) = std::fs::read_to_string(&header_path) {
@@ -196,29 +196,47 @@ impl CodeParser for CParser {
         // Auto-resolve local #include "..." headers for type context
         let header_types = Self::resolve_local_includes(source, file_path);
 
-        if header_types.is_empty() {
-            // No local headers — use the original strict→tolerant flow
-            let start = Instant::now();
-            let ir = match extractor::extract(source, file_path, &self.config) {
-                Ok(ir) => ir,
-                Err(ParserError::SyntaxError(..)) => {
-                    let options = extractor::ExtractionOptions::for_kernel_code();
-                    let result =
-                        extractor::extract_with_options(source, file_path, &options)?;
-                    result.ir
-                }
-                Err(e) => return Err(e),
-            };
+        let start = Instant::now();
 
-            let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
-            file_info.parse_time = start.elapsed();
-            file_info.line_count = source.lines().count();
-            file_info.byte_count = source.len();
-            Ok(file_info)
-        } else {
-            // Headers found — use the header-aware path
-            self.parse_source_with_headers(source, file_path, graph, header_types)
-        }
+        let needs_preprocess =
+            !header_types.is_empty() || extractor::source_needs_type_preamble(source);
+
+        let options = extractor::ExtractionOptions {
+            extract_calls: true,
+            preprocess: needs_preprocess,
+            header_types,
+            ..Default::default()
+        };
+
+        let result = match extractor::extract_with_options(source, file_path, &options) {
+            Ok(r) if r.is_partial => {
+                // Retry with tolerant mode
+                let tolerant = extractor::ExtractionOptions {
+                    tolerant_mode: true,
+                    preprocess: true,
+                    extract_calls: true,
+                    header_types: options.header_types,
+                };
+                extractor::extract_with_options(source, file_path, &tolerant)?
+            }
+            Ok(r) => r,
+            Err(ParserError::SyntaxError(..)) => {
+                // Strict mode failed — retry with tolerant + preprocess
+                let tolerant = extractor::ExtractionOptions::for_kernel_code();
+                extractor::extract_with_options(source, file_path, &tolerant)?
+            }
+            Err(e) => return Err(e),
+        };
+
+        let mut file_info = self.ir_to_graph(&result.ir, graph, file_path)?;
+
+        // Apply kernel macro metadata (entry points, exported symbols)
+        mapper::apply_kernel_macros(graph, &result.entry_points, &result.exported_symbols);
+
+        file_info.parse_time = start.elapsed();
+        file_info.line_count = source.lines().count();
+        file_info.byte_count = source.len();
+        Ok(file_info)
     }
 
     fn config(&self) -> &ParserConfig {
