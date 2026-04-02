@@ -184,14 +184,54 @@ impl<'a> CVisitor<'a> {
                 }
 
                 self.calls.push(FunctionCall {
-                    callee,
+                    callee: callee.clone(),
                     line: node.start_position().row + 1,
                     caller: self.current_function.clone(),
                     struct_type: None,
                     field_name: None,
                 });
+
+                // Extract function pointer arguments — bare identifiers passed
+                // as arguments that look like function names (callbacks).
+                // e.g., request_irq(irq, ice_misc_intr, ...) → ice_misc_intr is a call target
+                if self.current_function.is_some() {
+                    if let Some(args) = node.child_by_field_name("arguments") {
+                        let mut cursor = args.walk();
+                        for arg in args.children(&mut cursor) {
+                            if arg.kind() == "identifier" {
+                                let arg_name = self.node_text(arg);
+                                // Filter: must look like a function name, not a variable
+                                // Heuristic: starts with letter/underscore, contains underscore
+                                // (most C function names do), not a common keyword/type
+                                if !arg_name.is_empty()
+                                    && arg_name.contains('_')
+                                    && !Self::is_common_identifier(&arg_name)
+                                    && arg_name != callee
+                                {
+                                    self.calls.push(FunctionCall {
+                                        callee: arg_name,
+                                        line: node.start_position().row + 1,
+                                        caller: self.current_function.clone(),
+                                        struct_type: None,
+                                        field_name: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// Check if an identifier is a common variable/type name (not a function pointer).
+    fn is_common_identifier(name: &str) -> bool {
+        matches!(
+            name,
+            "NULL" | "null" | "true" | "false" | "TRUE" | "FALSE"
+                | "GFP_KERNEL" | "GFP_ATOMIC" | "IRQF_SHARED"
+                | "THIS_MODULE" | "ARRAY_SIZE"
+        )
     }
 
     fn visit_function(&mut self, node: Node) {

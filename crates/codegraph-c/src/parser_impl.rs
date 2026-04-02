@@ -74,32 +74,63 @@ impl CParser {
     }
 
     /// Scan a C source file for `#include "..."` directives and resolve them
-    /// relative to the file's directory. Returns extracted types from found headers.
+    /// against multiple search paths. Returns extracted types from found headers.
+    ///
+    /// Search order for each `#include "header.h"`:
+    /// 1. Same directory as the source file
+    /// 2. Parent directory (handles `src/core/main.c` including `src/header.h`)
+    /// 3. Grandparent directory
+    /// 4. `include/` subdirectory of each ancestor
     pub fn resolve_local_includes(source: &str, file_path: &Path) -> Vec<(String, String)> {
         let parent = match file_path.parent() {
             Some(p) => p,
             None => return Vec::new(),
         };
 
+        // Build search paths: same dir, parent, grandparent, include/ subdirs
+        let mut search_paths = vec![parent.to_path_buf()];
+        if let Some(grandparent) = parent.parent() {
+            search_paths.push(grandparent.to_path_buf());
+            // Check for include/ subdirectory
+            let include_dir = grandparent.join("include");
+            if include_dir.exists() {
+                search_paths.push(include_dir);
+            }
+            if let Some(great) = grandparent.parent() {
+                search_paths.push(great.to_path_buf());
+                let include_dir = great.join("include");
+                if include_dir.exists() {
+                    search_paths.push(include_dir);
+                }
+            }
+        }
+
         let mut all_types = Vec::new();
         let mut seen_headers = std::collections::HashSet::new();
 
         for line in source.lines() {
             let trimmed = line.trim();
-            // Match #include "local_header.h" (not <system_header.h>)
             if let Some(rest) = trimmed.strip_prefix("#include") {
                 let rest = rest.trim();
                 if let Some(stripped) = rest.strip_prefix('"') {
                     if let Some(end) = stripped.find('"') {
                         let header_name = &stripped[..end];
-                        let header_path = parent.join(header_name);
-                        if header_path.exists() && seen_headers.insert(header_path.clone()) {
-                            if let Ok(header_source) = std::fs::read_to_string(&header_path) {
-                                let types =
-                                    crate::preprocessor::CPreprocessor::extract_header_types(
-                                        &header_source,
-                                    );
-                                all_types.extend(types);
+                        // Try each search path
+                        for search_dir in &search_paths {
+                            let header_path = search_dir.join(header_name);
+                            if header_path.exists()
+                                && seen_headers.insert(header_path.clone())
+                            {
+                                if let Ok(header_source) =
+                                    std::fs::read_to_string(&header_path)
+                                {
+                                    let types =
+                                        crate::preprocessor::CPreprocessor::extract_header_types(
+                                            &header_source,
+                                        );
+                                    all_types.extend(types);
+                                }
+                                break; // Found — don't search further
                             }
                         }
                     }
