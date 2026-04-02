@@ -10,6 +10,7 @@
 //! **License:** Apache-2.0
 //! **Repository:** <https://github.com/anvanster/codegraph>
 
+pub mod aspx;
 mod extractor;
 mod mapper;
 mod parser_impl;

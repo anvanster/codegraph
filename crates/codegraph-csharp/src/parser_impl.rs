@@ -77,7 +77,7 @@ impl CodeParser for CSharpParser {
     }
 
     fn file_extensions(&self) -> &[&str] {
-        &[".cs"]
+        &[".cs", ".aspx", ".ascx", ".master"]
     }
 
     fn parse_file(&self, path: &Path, graph: &mut CodeGraph) -> Result<FileInfo, ParserError> {
@@ -112,6 +112,18 @@ impl CodeParser for CSharpParser {
         file_path: &Path,
         graph: &mut CodeGraph,
     ) -> Result<FileInfo, ParserError> {
+        // Route .aspx/.ascx/.master files to the directive extractor
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if matches!(ext, "aspx" | "ascx" | "master") {
+            let start = Instant::now();
+            let mut file_info = crate::aspx::parse_aspx(source, file_path, graph)?;
+            file_info.parse_time = start.elapsed();
+            return Ok(file_info);
+        }
+
         let start = Instant::now();
         let ir = extractor::extract(source, file_path, &self.config)?;
         let mut file_info = self.ir_to_graph(&ir, graph, file_path)?;
@@ -264,7 +276,7 @@ mod tests {
     #[test]
     fn test_file_extensions() {
         let parser = CSharpParser::new();
-        assert_eq!(parser.file_extensions(), &[".cs"]);
+        assert_eq!(parser.file_extensions(), &[".cs", ".aspx", ".ascx", ".master"]);
     }
 
     #[test]
